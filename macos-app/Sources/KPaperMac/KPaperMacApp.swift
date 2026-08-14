@@ -546,7 +546,7 @@ struct WorkspaceView: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
-            .padding(.top, 28)
+            .padding(.top, 6)
             .background(.thinMaterial)
 
             Divider()

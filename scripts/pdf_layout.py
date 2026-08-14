@@ -164,6 +164,27 @@ def deduplicate_visual_blocks(blocks: list[LayoutBlock]) -> list[LayoutBlock]:
     return kept
 
 
+def combine_native_text_with_grounded_visuals(
+    native_blocks: list[LayoutBlock], grounded_blocks: list[LayoutBlock]
+) -> list[LayoutBlock]:
+    """Keep selectable PDF text while cropping each detected visual as one intact region."""
+    visuals = deduplicate_visual_blocks(
+        [block for block in grounded_blocks if is_visual_block(block)]
+    )
+    native_text = []
+    for block in native_blocks:
+        if is_visual_block(block):
+            continue
+        block_area = bbox_area(block.bbox)
+        if block_area and any(
+            intersection_area(block.bbox, visual.bbox) / block_area >= 0.45
+            for visual in visuals
+        ):
+            continue
+        native_text.append(block)
+    return order_layout_blocks(native_text + visuals)
+
+
 def order_layout_blocks(blocks: list[LayoutBlock]) -> list[LayoutBlock]:
     """Reflow common two-column paper pages into article reading order."""
     midpoint = MODEL_INPUT_SIZE / 2

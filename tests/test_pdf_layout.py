@@ -94,6 +94,30 @@ class LayoutFallbackTests(unittest.TestCase):
 
 
 class LayoutRendererTests(unittest.TestCase):
+    def test_keeps_one_grounded_crop_for_a_composite_vector_figure(self) -> None:
+        native_blocks = [
+            pdf_layout.LayoutBlock("text", (100, 80, 900, 130), "Before"),
+            pdf_layout.LayoutBlock("figure", (180, 180, 240, 240), ""),
+            pdf_layout.LayoutBlock("figure", (260, 180, 320, 240), ""),
+            pdf_layout.LayoutBlock("text", (200, 220, 300, 250), "inside figure"),
+            pdf_layout.LayoutBlock("text", (100, 700, 900, 760), "After"),
+        ]
+        grounded_blocks = [
+            pdf_layout.LayoutBlock("image", (150, 150, 850, 650), ""),
+            pdf_layout.LayoutBlock("image-caption", (300, 660, 700, 690), "Figure 1"),
+        ]
+
+        combined = pdf_layout.combine_native_text_with_grounded_visuals(
+            native_blocks, grounded_blocks
+        )
+
+        visuals = [block for block in combined if pdf_layout.is_visual_block(block)]
+        self.assertEqual(len(visuals), 1)
+        self.assertEqual(visuals[0].bbox, (150, 150, 850, 650))
+        self.assertNotIn("inside figure", [block.text for block in combined])
+        self.assertIn("Before", [block.text for block in combined])
+        self.assertIn("After", [block.text for block in combined])
+
     def test_crops_visual_block_between_surrounding_text(self) -> None:
         blocks = [
             pdf_layout.LayoutBlock("text", (0, 0, 1024, 150), "Before table"),

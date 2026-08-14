@@ -344,7 +344,7 @@ def pdf_to_source_html(
         classification = classify_pdf_for_ocr(pdf_path)
         ocr_page_indices = set(classification["pages_needing_ocr"])
         if not ocr_page_indices:
-            effective_layout_backend = "native"
+            effective_layout_backend = "native-text+grounded-visuals"
         elif len(ocr_page_indices) >= classification["page_count"]:
             effective_layout_backend = "unlimited-ocr-mlx"
         else:
@@ -378,7 +378,7 @@ def pdf_to_source_html(
     layout_fallbacks: list[dict[str, Any]] = []
     layout_engine = (
         pdf_layout.UnlimitedOCRMLX(model_id=layout_model, max_tokens=layout_max_tokens)
-        if layout_backend == "unlimited-ocr-mlx" or (layout_backend == "auto" and ocr_page_indices)
+        if layout_backend in {"auto", "unlimited-ocr-mlx"}
         else None
     )
 
@@ -402,11 +402,9 @@ def pdf_to_source_html(
         page = pages[page_index] if page_index < len(pages) else {}
         page_image = image_paths[page_index] if page_index < len(image_paths) else None
         if layout_backend != "liteparse" and page_image is not None:
-            use_mlx_layout = layout_backend == "unlimited-ocr-mlx" or (
-                layout_backend == "auto" and page_index in ocr_page_indices
-            )
+            use_mlx_layout = layout_backend in {"auto", "unlimited-ocr-mlx"}
             if use_mlx_layout and layout_engine is not None:
-                layout_blocks, raw_layout, fallback_reason = extract_image_layout_with_fallback(
+                grounded_blocks, raw_layout, fallback_reason = extract_image_layout_with_fallback(
                     pdf_path, page_index, page_image, layout_engine
                 )
                 if fallback_reason:
@@ -418,9 +416,9 @@ def pdf_to_source_html(
                             "reason": fallback_reason,
                         }
                     )
-                layout_blocks = [
+                grounded_blocks = [
                     block
-                    for block in layout_blocks
+                    for block in grounded_blocks
                     if not pdf_layout.is_page_number_block(block)
                     and not (
                         page_index > 0
@@ -428,6 +426,17 @@ def pdf_to_source_html(
                         and block.bbox[1] < 85
                     )
                 ]
+                if layout_backend == "auto" and page_index not in ocr_page_indices and not fallback_reason:
+                    native_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
+                    layout_blocks = pdf_layout.combine_native_text_with_grounded_visuals(
+                        native_blocks, grounded_blocks
+                    )
+                elif layout_backend == "auto" and page_index not in ocr_page_indices:
+                    layout_blocks = [
+                        block for block in grounded_blocks if not pdf_layout.is_visual_block(block)
+                    ]
+                else:
+                    layout_blocks = grounded_blocks
             else:
                 layout_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
                 raw_layout = ""
@@ -505,6 +514,8 @@ def pdf_to_source_html(
             page_backend = "LiteParse"
         elif layout_backend == "unlimited-ocr-mlx" or page_index in ocr_page_indices:
             page_backend = "Unlimited-OCR"
+        elif layout_backend == "auto":
+            page_backend = "원문 텍스트 + 원본 그림"
         else:
             page_backend = "원문 텍스트"
         emit_progress(
@@ -558,7 +569,7 @@ def pdf_to_source_html(
         "parser": "pdf-inspector+liteparse+pymupdf-layout" if layout_backend == "auto" else (
             "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python"
         ),
-        "ocr_enabled": layout_engine is not None,
+        "ocr_enabled": layout_backend == "unlimited-ocr-mlx" or bool(ocr_page_indices),
         "layout_backend": layout_backend,
         "effective_layout_backend": effective_layout_backend,
         "pdf_classification": classification,
