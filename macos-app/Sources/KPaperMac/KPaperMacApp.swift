@@ -50,7 +50,41 @@ struct TranslationJob: Identifiable {
     var progressPhase: String = "preparing"
     var progressDetail: String = ""
     var startedAt: Date = .now
-    var logText: String = ""
+}
+
+private enum DebugLogStore {
+    private static let queue = DispatchQueue(label: "io.codex.kpaper.debug-log", qos: .utility)
+
+    static var directoryURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("KPaper/Logs", isDirectory: true)
+    }
+
+    static func append(_ message: String, workflowID: UUID? = nil) {
+        guard !message.isEmpty else { return }
+        queue.async {
+            do {
+                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+                let day = DateFormatter()
+                day.locale = Locale(identifier: "en_US_POSIX")
+                day.dateFormat = "yyyy-MM-dd"
+                let fileURL = directoryURL.appendingPathComponent("kpaper-\(day.string(from: Date())).log")
+                let timestamp = ISO8601DateFormatter().string(from: Date())
+                let workflow = workflowID.map { " [\($0.uuidString)]" } ?? ""
+                let data = "\(timestamp)\(workflow) \(message)\n".data(using: .utf8)!
+                if !FileManager.default.fileExists(atPath: fileURL.path) {
+                    try data.write(to: fileURL, options: .atomic)
+                } else {
+                    let handle = try FileHandle(forWritingTo: fileURL)
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: data)
+                    try handle.close()
+                }
+            } catch {
+                // Debug logging must never interrupt a translation workflow.
+            }
+        }
+    }
 }
 
 struct WorkspaceView: View {
@@ -769,20 +803,13 @@ struct WorkspaceView: View {
                         .buttonStyle(WorkspacePrimaryButtonStyle(compact: true))
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("진행 로그")
-                        .font(.system(size: 13, weight: .semibold))
-                    ScrollView {
-                        Text(model.logText.isEmpty ? "대기 중입니다." : model.logText)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(WorkspacePalette.secondaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-                    .frame(minHeight: 120)
-                    .padding(12)
-                    .background(WorkspacePalette.controlFill)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                HStack {
+                    Label("디버그 로그는 이 Mac에만 저장됩니다.", systemImage: "lock.doc")
+                        .font(.system(size: 11))
+                        .foregroundStyle(WorkspacePalette.tertiaryText)
+                    Spacer()
+                    Button("로그 폴더 열기") { model.openDebugLogsFolder() }
+                        .buttonStyle(.link)
                 }
             }
             .padding(.horizontal, 42)
@@ -1325,7 +1352,6 @@ struct ContentView: View {
                         .frame(width: 300)
                     }
                     settingsPanel
-                    logPanel
                 }
                 .padding(.horizontal, 28)
                 .padding(.vertical, 24)
@@ -1589,27 +1615,6 @@ struct ContentView: View {
         .glassCard()
     }
 
-    private var logPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("진행 로그", systemImage: "terminal")
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(model.logText.isEmpty ? "대기 중입니다." : model.logText)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(model.logText.isEmpty ? AppPalette.textTertiary : AppPalette.textPrimary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .id("log-end")
-                }
-                .frame(minHeight: 190)
-                .onChange(of: model.logText) { _ in
-                    proxy.scrollTo("log-end", anchor: .bottom)
-                }
-            }
-        }
-        .glassCard()
-    }
-
     private var runtimePanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("실행 환경", systemImage: "cpu")
@@ -1821,7 +1826,6 @@ final class TranslatorModel: ObservableObject {
     @Published var codexAuthStatus = "상태를 확인해주세요"
     @Published var isCodexAuthenticated = false
     @Published var clipboardPreview = ""
-    @Published var logText = ""
     @Published var statusText = "대기"
     @Published var lastPaperID = ""
     @Published var lastKoreanOutput = ""
@@ -2027,17 +2031,23 @@ final class TranslatorModel: ObservableObject {
         updateJob(workflowID) { job in
             job.statusText = "중지됨"
             job.isRunning = false
-            Self.append("cancel requested", to: &job.logText)
         }
+        DebugLogStore.append("cancel requested", workflowID: workflowID)
         syncRunningState(status: "중지됨")
-        if let job = jobs.first(where: { $0.id == workflowID }) {
-            logText = job.logText
-        }
     }
 
     func openOutput(kind: OutputKind) {
         guard let url = outputURL(kind: kind) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    func openDebugLogsFolder() {
+        do {
+            try FileManager.default.createDirectory(at: DebugLogStore.directoryURL, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(DebugLogStore.directoryURL)
+        } catch {
+            appendLog("error: could not open debug log folder: \(error.localizedDescription)")
+        }
     }
 
     func outputURL(kind: OutputKind) -> URL? {
@@ -2154,7 +2164,6 @@ final class TranslatorModel: ObservableObject {
             isRunning: true
         ))
         selectedWorkflowID = workflowID
-        logText = ""
         lastPaperID = paperID
         lastKoreanOutput = ""
         lastBilingualOutput = ""
@@ -2332,7 +2341,6 @@ final class TranslatorModel: ObservableObject {
         progressPhase = job.progressPhase
         progressDetail = job.progressDetail
         workflowStartedAt = job.startedAt
-        logText = job.logText
     }
 
     private func finishWorkflow(_ workflowID: UUID, status: String, logLine: String?) {
@@ -2345,12 +2353,11 @@ final class TranslatorModel: ObservableObject {
                 job.progressCompleted = max(job.progressTotal, job.progressCompleted)
                 job.progressLabel = "완료"
             }
-            if let logLine { Self.append(logLine, to: &job.logText) }
         }
+        if let logLine { DebugLogStore.append(logLine, workflowID: workflowID) }
         if selectedWorkflowID == workflowID {
             statusText = status
             if let job = jobs.first(where: { $0.id == workflowID }) {
-                logText = job.logText
                 progressPhase = job.progressPhase
                 progressCompleted = job.progressCompleted
                 progressTotal = job.progressTotal
@@ -2373,36 +2380,20 @@ final class TranslatorModel: ObservableObject {
         change(&jobs[index])
     }
 
-    private static func append(_ line: String, to text: inout String) {
-        guard !line.isEmpty else { return }
-        text = text.isEmpty ? line : text + "\n" + line
-        if text.count > 120_000 {
-            text.removeFirst(text.count - 120_000)
-        }
-    }
-
     private func appendLog(_ line: String) {
         guard !line.isEmpty else { return }
         updateProgress(from: line)
-        if logText.isEmpty {
-            logText = line
-        } else {
-            logText += "\n" + line
-        }
-        if logText.count > 120_000 {
-            logText.removeFirst(logText.count - 120_000)
-        }
+        DebugLogStore.append(line)
     }
 
     private func appendLog(_ line: String, workflowID: UUID) {
         guard !line.isEmpty else { return }
         updateJob(workflowID) { job in
-            Self.append(line, to: &job.logText)
             Self.updateProgress(from: line, job: &job)
         }
+        DebugLogStore.append(line, workflowID: workflowID)
         guard selectedWorkflowID == workflowID else { return }
         updateProgress(from: line)
-        Self.append(line, to: &logText)
     }
 
     private func beginCommand(_ command: String, workflowID: UUID) {
