@@ -786,7 +786,14 @@ def extract_json(text: str) -> dict[str, Any]:
         return json.loads(match.group(0))
 
 
-def call_api(base_url: str, api_key: str, model: str, batch: list[tuple[str, str]], timeout: int, retries: int) -> dict[str, str]:
+def call_api(
+    base_url: str,
+    api_key: str,
+    model: str,
+    batch: list[tuple[str, str]],
+    timeout: int,
+    retries: int,
+) -> tuple[dict[str, str], int, int]:
     endpoint = base_url.rstrip("/") + "/chat/completions"
     payload = {
         "model": model,
@@ -810,7 +817,11 @@ def call_api(base_url: str, api_key: str, model: str, batch: list[tuple[str, str
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
             parsed = extract_json(content)
-            return {str(item["id"]): str(item["text"]) for item in parsed["translations"]}
+            usage = data.get("usage") or {}
+            input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+            output_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+            translations = {str(item["id"]): str(item["text"]) for item in parsed["translations"]}
+            return translations, input_tokens, output_tokens
         except Exception as exc:  # noqa: BLE001
             last = exc
             if attempt >= retries:
@@ -819,7 +830,12 @@ def call_api(base_url: str, api_key: str, model: str, batch: list[tuple[str, str
     raise RuntimeError(f"request failed: {last}") from last
 
 
-def call_codex(model: str, batch: list[tuple[str, str]], timeout: int, retries: int) -> dict[str, str]:
+def call_codex(
+    model: str,
+    batch: list[tuple[str, str]],
+    timeout: int,
+    retries: int,
+) -> tuple[dict[str, str], int, int]:
     codex = os.environ.get("CODEX_EXECUTABLE") or shutil.which("codex")
     if not codex:
         raise RuntimeError("codex CLI not found; install Codex and sign in with ChatGPT first")
@@ -870,7 +886,8 @@ def call_codex(model: str, batch: list[tuple[str, str]], timeout: int, retries: 
                 detail = completed.stderr.strip() or completed.stdout.strip() or f"exit {completed.returncode}"
                 raise RuntimeError(detail)
             parsed = extract_json(output_path.read_text(encoding="utf-8"))
-            return {str(item["id"]): str(item["text"]) for item in parsed["translations"]}
+            translations = {str(item["id"]): str(item["text"]) for item in parsed["translations"]}
+            return translations, 0, 0
         except Exception as exc:  # noqa: BLE001
             last = exc
             if attempt >= retries:
@@ -1128,25 +1145,41 @@ def main(argv: list[str]) -> None:
     concurrency = max(1, min(args.concurrency, 3 if args.provider == "codex" else args.concurrency))
     log(f"translating {len(batches)} batches provider={args.provider} concurrency={concurrency}")
 
-    def translate_batch(batch: list[tuple[str, str]]) -> dict[str, str]:
+    def translate_batch(batch: list[tuple[str, str]]) -> tuple[dict[str, str], int, int]:
         if args.provider == "codex":
             return call_codex(args.model, batch, args.timeout, args.max_retries)
         return call_api(base_url, api_key, args.model, batch, args.timeout, args.max_retries)
 
-    def finalize_batch(batch_no: int, batch: list[tuple[str, str]], result: dict[str, str]) -> None:
+    cumulative_input_tokens = 0
+    cumulative_output_tokens = 0
+
+    def finalize_batch(
+        batch_no: int,
+        batch: list[tuple[str, str]],
+        response: tuple[dict[str, str], int, int],
+    ) -> None:
+        nonlocal cumulative_input_tokens, cumulative_output_tokens
+        result, input_tokens, output_tokens = response
         missing = [bid for bid, _ in batch if bid not in result]
         if missing:
             log(f"batch {batch_no} missing={len(missing)}; retrying one by one")
             for bid, html_fragment in batch:
                 if bid in result:
                     continue
-                single = translate_batch([(bid, html_fragment)])
+                single, single_input_tokens, single_output_tokens = translate_batch([(bid, html_fragment)])
                 result.update(single)
+                input_tokens += single_input_tokens
+                output_tokens += single_output_tokens
         for bid, source_masked in batch:
             ko_masked = result[bid]
             translations[bid] = ko_masked
             append_cache(cache_path, source_masked, ko_masked)
-        log(f"completed batch {batch_no}/{len(batches)} translated={len(translations)}/{len(blocks)}")
+        cumulative_input_tokens += input_tokens
+        cumulative_output_tokens += output_tokens
+        log(
+            f"completed batch {batch_no}/{len(batches)} translated={len(translations)}/{len(blocks)} "
+            f"input_tokens={cumulative_input_tokens} output_tokens={cumulative_output_tokens}"
+        )
 
     with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="translate") as executor:
         futures = {}

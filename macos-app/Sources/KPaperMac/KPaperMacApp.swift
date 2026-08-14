@@ -50,6 +50,8 @@ struct TranslationJob: Identifiable {
     var progressPhase: String = "preparing"
     var progressDetail: String = ""
     var documentStructureSummary: String = ""
+    var inputTokens: Int = 0
+    var outputTokens: Int = 0
     var startedAt: Date = .now
 }
 
@@ -391,6 +393,12 @@ struct WorkspaceView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(WorkspacePalette.secondaryText)
             }
+            if model.progressPhase == "translate", model.inputTokens + model.outputTokens > 0 {
+                Label(tokenUsageSummary, systemImage: "number")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(WorkspacePalette.tertiaryText)
+                    .contentTransition(.numericText())
+            }
 
             Spacer()
 
@@ -447,6 +455,16 @@ struct WorkspaceView: View {
     private func elapsedText(at date: Date) -> String {
         let seconds = max(0, Int(date.timeIntervalSince(model.workflowStartedAt)))
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private var tokenUsageSummary: String {
+        "입력 \(formattedTokenCount(model.inputTokens)) · 출력 \(formattedTokenCount(model.outputTokens)) 토큰"
+    }
+
+    private func formattedTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.1fK", Double(count) / 1_000) }
+        return String(count)
     }
 
     private var progressTimeline: some View {
@@ -1814,6 +1832,8 @@ final class TranslatorModel: ObservableObject {
     @Published var progressPhase = "preparing"
     @Published var progressDetail = ""
     @Published var documentStructureSummary = ""
+    @Published var inputTokens = 0
+    @Published var outputTokens = 0
     @Published var workflowStartedAt = Date()
     @Published private(set) var jobs: [TranslationJob] = []
     @Published private(set) var selectedWorkflowID: UUID?
@@ -2153,6 +2173,8 @@ final class TranslatorModel: ObservableObject {
         progressPhase = "preparing"
         progressDetail = ""
         documentStructureSummary = ""
+        inputTokens = 0
+        outputTokens = 0
         workflowStartedAt = Date()
         statusText = "\(title) 실행 중"
         syncRunningState(status: "\(title) 실행 중")
@@ -2322,6 +2344,8 @@ final class TranslatorModel: ObservableObject {
         progressPhase = job.progressPhase
         progressDetail = job.progressDetail
         documentStructureSummary = job.documentStructureSummary
+        inputTokens = job.inputTokens
+        outputTokens = job.outputTokens
         workflowStartedAt = job.startedAt
     }
 
@@ -2355,6 +2379,8 @@ final class TranslatorModel: ObservableObject {
                 progressLabel = job.progressLabel
                 progressDetail = job.progressDetail
                 documentStructureSummary = job.documentStructureSummary
+                inputTokens = job.inputTokens
+                outputTokens = job.outputTokens
             }
         }
         syncRunningState(status: status)
@@ -2469,6 +2495,11 @@ final class TranslatorModel: ObservableObject {
         )
     }
 
+    private static func tokenCount(named name: String, in line: String) -> Int? {
+        guard let marker = line.range(of: "\(name)=") else { return nil }
+        return Int(line[marker.upperBound...].prefix(while: \.isNumber))
+    }
+
     private func updateProgress(from text: String) {
         for rawLine in text.split(whereSeparator: \.isNewline) {
             let line = String(rawLine)
@@ -2505,6 +2536,8 @@ final class TranslatorModel: ObservableObject {
             progressPhase = "translate"
             progressLabel = "번역 청크 \(progressCompleted)/\(total)"
             progressDetail = ""
+            inputTokens = Self.tokenCount(named: "input_tokens", in: line) ?? inputTokens
+            outputTokens = Self.tokenCount(named: "output_tokens", in: line) ?? outputTokens
         }
     }
 
@@ -2544,6 +2577,8 @@ final class TranslatorModel: ObservableObject {
             job.progressPhase = "translate"
             job.progressLabel = "번역 청크 \(job.progressCompleted)/\(total)"
             job.progressDetail = ""
+            job.inputTokens = tokenCount(named: "input_tokens", in: line) ?? job.inputTokens
+            job.outputTokens = tokenCount(named: "output_tokens", in: line) ?? job.outputTokens
         }
     }
 
