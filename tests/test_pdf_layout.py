@@ -56,6 +56,22 @@ class GroundedLayoutParserTests(unittest.TestCase):
 
 
 class LayoutFallbackTests(unittest.TestCase):
+    def test_pdf_inspector_routes_digital_pdf_without_ocr(self) -> None:
+        import pymupdf
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            pdf_path = Path(temporary_directory) / "digital.pdf"
+            document = pymupdf.open()
+            page = document.new_page()
+            page.insert_text((72, 72), "This digital PDF already contains selectable text.")
+            document.save(pdf_path)
+            document.close()
+
+            classification = kpaper.classify_pdf_for_ocr(pdf_path)
+
+        self.assertEqual(classification["pdf_type"], "text_based")
+        self.assertEqual(classification["pages_needing_ocr"], [])
+
     def test_uses_native_layout_when_mlx_returns_no_blocks(self) -> None:
         class EmptyLayoutEngine:
             def parse_image(self, _image_path: Path):

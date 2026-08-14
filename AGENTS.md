@@ -72,19 +72,18 @@ Fetch source HTML with explicit flags:
   --json
 ```
 
-For PDF-only papers, first import the PDF. `uv sync` installs LiteParse, MLX-VLM, Pillow, and PyMuPDF. Agents may also add the LiteParse skill instructions with `npx skills add run-llama/llamaparse-agent-skills --skill liteparse`.
+For PDF-only papers, first import the PDF. `uv sync` installs pdf-inspector, LiteParse, MLX-VLM, Pillow, and PyMuPDF. The default `auto` backend preserves native text and routes only pages needing OCR to Unlimited-OCR.
 
 ```bash
 ./kpaper pdf-import \
   --paper-id deepseek-v4 \
   --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
   --title "DeepSeek V4" \
-  --layout-backend unlimited-ocr-mlx \
-  --layout-model sahilchachra/unlimited-ocr-mxfp8-mlx \
+  --layout-backend auto \
   --json
 ```
 
-The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, renders page PNGs with LiteParse, runs the MLX model page by page for reading order and grounded boxes, writes inline visual crops under `inputs/assets/<paper-id>/layout/`, and writes `inputs/<paper-id>.source.html`.
+The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, classifies pages with pdf-inspector, preserves native text where available, runs the MLX model only for pages needing OCR, writes inline visual crops under `inputs/assets/<paper-id>/layout/`, and writes `inputs/<paper-id>.source.html`.
 
 Dry run before calling the model:
 

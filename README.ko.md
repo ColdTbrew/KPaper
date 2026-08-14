@@ -29,7 +29,7 @@
 ## 주요 기능
 
 - PDF 파싱 대신 ar5iv HTML을 사용합니다.
-- PDF만 있는 논문은 Unlimited-OCR MXFP8 grounding으로 읽기 순서와 bbox를 추출하고 표·차트·그림 crop을 본문 사이에 넣은 source HTML로 변환합니다.
+- PDF는 `pdf-inspector`로 먼저 판별하고 원문 텍스트가 있으면 그대로 보존하며, OCR이 필요한 페이지만 Unlimited-OCR MXFP8로 처리합니다.
 - 모델 호출 전에 HTML 태그를 마스킹하고, 번역 후 같은 태그를 복원합니다.
 - 번역 가능한 텍스트 블록만 모델에 보냅니다.
 - `figure.ltx_table` 표 HTML은 모델에 보내지 않고 원본 그대로 유지해 토큰을 절약하고 표 깨짐을 줄입니다.
@@ -206,7 +206,7 @@ dist/KPaper.app
 
 ## PDF만 있는 논문
 
-ar5iv HTML이 없고 PDF만 있는 문서는 먼저 PDF를 source HTML로 가져옵니다. Apple Silicon에서는 기본 레이아웃 백엔드가 `sahilchachra/unlimited-ocr-mxfp8-mlx`를 페이지별로 실행해 읽기 순서와 블록 bbox를 복원합니다.
+ar5iv HTML이 없고 PDF만 있는 문서는 먼저 PDF를 source HTML로 가져옵니다. 기본 `auto` 백엔드는 `pdf-inspector`로 디지털·스캔·혼합 PDF를 판별합니다. 디지털 페이지는 원문 텍스트와 좌표를 사용하고, OCR이 필요한 페이지만 `sahilchachra/unlimited-ocr-mxfp8-mlx`로 읽기 순서와 블록 bbox를 복원합니다.
 
 ```bash
 uv sync
@@ -256,7 +256,7 @@ uv sync
   --layout-model sahilchachra/unlimited-ocr-mxfp8-mlx
 ```
 
-텍스트 PDF에서 빠른 PyMuPDF 기하 분석을 원하면 `--layout-backend native`, 기존처럼 페이지 전체 이미지를 우선하려면 `--layout-backend liteparse`를 사용합니다.
+기본 `auto`는 페이지별로 네이티브 추출과 Unlimited-OCR을 자동 선택합니다. 전체를 강제로 네이티브 처리하려면 `--layout-backend native`, 전체를 OCR하려면 `--layout-backend unlimited-ocr-mlx`를 사용합니다.
 
 ## 리더 스타일 재적용 또는 표 복원
 

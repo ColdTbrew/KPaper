@@ -689,7 +689,7 @@ struct WorkspaceView: View {
                     SettingRow(title: "PDF 레이아웃") {
                         VStack(alignment: .leading, spacing: 5) {
                             Toggle("표·차트·그림을 본문 위치에 삽입", isOn: $model.useAdvancedPDFLayout)
-                            Text("sahilchachra/unlimited-ocr-mxfp8-mlx · Apple Silicon 로컬 처리")
+                            Text("디지털 PDF는 원문 추출 · 필요한 페이지만 Unlimited-OCR")
                                 .font(.system(size: 11))
                                 .foregroundStyle(WorkspacePalette.secondaryText)
                         }
@@ -1892,7 +1892,7 @@ final class TranslatorModel: ObservableObject {
             var importArguments = ["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"]
             if settings.useAdvancedPDFLayout {
                 importArguments += [
-                    "--layout-backend", "unlimited-ocr-mlx",
+                    "--layout-backend", "auto",
                     "--layout-model", "sahilchachra/unlimited-ocr-mxfp8-mlx"
                 ]
             } else {

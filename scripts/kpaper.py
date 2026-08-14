@@ -219,6 +219,24 @@ def load_liteparse() -> Any:
     return LiteParse
 
 
+def classify_pdf_for_ocr(pdf_path: Path) -> dict[str, Any]:
+    try:
+        import pdf_inspector  # type: ignore[import-not-found]
+    except ModuleNotFoundError:
+        fail(
+            "automatic PDF routing requires pdf-inspector, but it is not installed",
+            "install project dependencies with: uv sync",
+            code=1,
+        )
+    result = pdf_inspector.classify_pdf(str(pdf_path))
+    return {
+        "pdf_type": result.pdf_type,
+        "confidence": float(result.confidence),
+        "page_count": int(result.page_count),
+        "pages_needing_ocr": [int(page) for page in result.pages_needing_ocr],
+    }
+
+
 def split_text_paragraphs(text: str) -> list[str]:
     paragraphs: list[str] = []
     for chunk in re.split(r"\n\s*\n", text):
@@ -290,10 +308,25 @@ def pdf_to_source_html(
             "max_pages": max_pages,
             "layout_backend": layout_backend,
             "layout_model": layout_model if layout_backend == "unlimited-ocr-mlx" else "",
-            "parser": "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python",
+            "parser": "pdf-inspector+liteparse+pymupdf-layout" if layout_backend == "auto" else (
+                "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python"
+            ),
         }
     if not pdf_path.exists():
         fail(f"PDF not found: {pdf_path}")
+
+    classification: dict[str, Any] | None = None
+    ocr_page_indices: set[int] = set()
+    effective_layout_backend = layout_backend
+    if layout_backend == "auto":
+        classification = classify_pdf_for_ocr(pdf_path)
+        ocr_page_indices = set(classification["pages_needing_ocr"])
+        if not ocr_page_indices:
+            effective_layout_backend = "native"
+        elif len(ocr_page_indices) >= classification["page_count"]:
+            effective_layout_backend = "unlimited-ocr-mlx"
+        else:
+            effective_layout_backend = "hybrid"
 
     LiteParse = load_liteparse()
     parser_kwargs: dict[str, Any] = {
@@ -312,7 +345,7 @@ def pdf_to_source_html(
     layout_fallbacks: list[dict[str, Any]] = []
     layout_engine = (
         pdf_layout.UnlimitedOCRMLX(model_id=layout_model, max_tokens=layout_max_tokens)
-        if layout_backend == "unlimited-ocr-mlx"
+        if layout_backend == "unlimited-ocr-mlx" or (layout_backend == "auto" and ocr_page_indices)
         else None
     )
 
@@ -328,7 +361,10 @@ def pdf_to_source_html(
         page = pages[page_index] if page_index < len(pages) else {}
         page_image = image_paths[page_index] if page_index < len(image_paths) else None
         if layout_backend != "liteparse" and page_image is not None:
-            if layout_engine is not None:
+            use_mlx_layout = layout_backend == "unlimited-ocr-mlx" or (
+                layout_backend == "auto" and page_index in ocr_page_indices
+            )
+            if use_mlx_layout and layout_engine is not None:
                 layout_blocks, raw_layout, fallback_reason = extract_image_layout_with_fallback(
                     pdf_path, page_index, page_image, layout_engine
                 )
@@ -440,9 +476,13 @@ def pdf_to_source_html(
         "images": len(image_paths),
         "text_blocks": text_blocks,
         "visual_blocks": visual_blocks,
-        "parser": "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python",
-        "ocr_enabled": False,
+        "parser": "pdf-inspector+liteparse+pymupdf-layout" if layout_backend == "auto" else (
+            "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python"
+        ),
+        "ocr_enabled": layout_engine is not None,
         "layout_backend": layout_backend,
+        "effective_layout_backend": effective_layout_backend,
+        "pdf_classification": classification,
         "layout_model": layout_model if layout_engine is not None else "",
         "layout_fallbacks": layout_fallbacks,
     }
@@ -463,6 +503,7 @@ def command_doctor(args: argparse.Namespace) -> None:
         "pymupdf_present": importlib.util.find_spec("pymupdf") is not None,
         "pillow_present": importlib.util.find_spec("PIL") is not None,
         "mlx_vlm_present": importlib.util.find_spec("mlx_vlm") is not None,
+        "pdf_inspector_present": importlib.util.find_spec("pdf_inspector") is not None,
         "inputs_dir_exists": Path("inputs").exists(),
         "outputs_dir_exists": Path("outputs").exists(),
         "scripts_dir_exists": Path("scripts").exists(),
@@ -736,9 +777,9 @@ def build_parser() -> argparse.ArgumentParser:
     pdf_import.add_argument("--max-pages", type=int, default=0, help="limit imported pages; 0 means all pages")
     pdf_import.add_argument(
         "--layout-backend",
-        choices=("native", "liteparse", "unlimited-ocr-mlx"),
-        default="unlimited-ocr-mlx",
-        help="layout source: Unlimited-OCR MLX grounding, native PDF geometry, or page-level LiteParse fallback",
+        choices=("auto", "native", "liteparse", "unlimited-ocr-mlx"),
+        default="auto",
+        help="layout source: automatic pdf-inspector routing, Unlimited-OCR MLX, native PDF geometry, or LiteParse",
     )
     pdf_import.add_argument(
         "--layout-model",

@@ -713,6 +713,33 @@ wheels = [
 ]
 
 [[package]]
+name = "kpaper"
+version = "0.0.1"
+source = { virtual = "." }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "liteparse" },
+    { name = "lxml" },
+    { name = "mlx-vlm" },
+    { name = "pdf-inspector" },
+    { name = "pillow" },
+    { name = "pymupdf" },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.14.3" },
+    { name = "liteparse", specifier = ">=2.0.0" },
+    { name = "lxml", specifier = ">=6.1.0" },
+    { name = "mlx-vlm", specifier = ">=0.6.4" },
+    { name = "pdf-inspector", specifier = ">=1.14.2" },
+    { name = "pillow", specifier = ">=12.1.1" },
+    { name = "pymupdf", specifier = ">=1.28.0" },
+    { name = "requests", specifier = ">=2.33.1" },
+]
+
+[[package]]
 name = "liteparse"
 version = "2.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1480,6 +1507,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/31/89/8fc1c268969fac43688d65fd92e67df24bd128d53cb4d2eee534cd307399/pandas-3.0.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:9c39be2d709d01fa972a0cabc522389fceca4f3969332ba25a7d6c5802cf976a", size = 11828897, upload-time = "2026-05-11T18:54:17.146Z" },
     { url = "https://files.pythonhosted.org/packages/56/3b/e7d20dea247a3e6dc0bd8a6953854afbedc03951def4e7371e05e7263e25/pandas-3.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:4db8c527972a821cf5286b40ccc57642a39bc62e62022b42f99f8a67fca8c3a1", size = 10900855, upload-time = "2026-05-11T18:54:19.72Z" },
     { url = "https://files.pythonhosted.org/packages/0f/54/68a0978d1ef8502b8492099beaa6e7a0c1b32e3b5d4f677f5810cb08711c/pandas-3.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:b2c95f8bfc1ee412bf482605d7bfd30c12d1d26bd59fdd91efeef1d4718decb1", size = 9466464, upload-time = "2026-05-11T18:54:22.754Z" },
+]
+
+[[package]]
+name = "pdf-inspector"
+version = "1.14.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/ba/6ef1dddc4151ed262bffd452d2289d59ddcb0525b64b62b36f34350c22a4/pdf_inspector-1.14.2.tar.gz", hash = "sha256:a0956ce5491112dbcbfeb8cefd1eaf0ef3409c0e008c434d74de1397cec447c7", size = 1576409, upload-time = "2026-08-13T21:19:08.486Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/66/992ab5293bc5713eec671aca1c69bcd9dbbda3e16721d5f024ab21a91cbe/pdf_inspector-1.14.2-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:9689427e4d8643355052acf2b837c6466f4f019a60ad59bdb5b96332c2b0e8c2", size = 2870693, upload-time = "2026-08-13T21:19:00.604Z" },
+    { url = "https://files.pythonhosted.org/packages/94/02/15ae2baf2b19de2e53d874b5177d5ce7982ef8f6dd60c643bc51f113be48/pdf_inspector-1.14.2-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:54fa3ae38c340c51b9e507bde91c94b77ac2338327c710f50147c22303d3cf38", size = 2785049, upload-time = "2026-08-13T21:19:02.582Z" },
+    { url = "https://files.pythonhosted.org/packages/36/b3/965bfec69b0bad2430d4603d14a5bc17386849fdca37c439c3c03c03fa9f/pdf_inspector-1.14.2-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:99a1edd232855bdb69b7f35add87987c8e3d40c8240638b2cd159987d3e29513", size = 2958709, upload-time = "2026-08-13T21:19:04.099Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/51/49b486a78dfd8ec27be56004443b4bf9be27c0aa23430074d9a6e29b8190/pdf_inspector-1.14.2-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8bf3536ddbc7756d6c60b2e8e023bc21366370ad6efb1a910f959206bcadf023", size = 3059332, upload-time = "2026-08-13T21:19:05.435Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/23/a2896789cc1e3c078f46dd3f25eec90b854099ae797ff1eca9df0a4d401e/pdf_inspector-1.14.2-cp38-abi3-win_amd64.whl", hash = "sha256:1f3638b6f2e54afbc1940c0bfd83740713d4fde6c44bcb75f1328254801f0ff4", size = 2702638, upload-time = "2026-08-13T21:19:07.008Z" },
 ]
 
 [[package]]
@@ -2359,31 +2399,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/eb/e3/7c1dc7381d9f8ab7d854328ebfa884e62cb3f3d8549ddfd37c7814f42afa/starlette-1.3.1.tar.gz", hash = "sha256:05d0213193f2fbaae60e2ecb593b4add4262ad4e46536b54abe36f11a71724e0", size = 2703240, upload-time = "2026-06-12T09:23:11.602Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/bb/2799cc2ede3ed41131f8975621e7213dfc7ef4acbbaadfa440f32500c370/starlette-1.3.1-py3-none-any.whl", hash = "sha256:c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6", size = 73632, upload-time = "2026-06-12T09:23:10.017Z" },
-]
-
-[[package]]
-name = "kpaper"
-version = "0.0.1"
-source = { virtual = "." }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "liteparse" },
-    { name = "lxml" },
-    { name = "mlx-vlm" },
-    { name = "pillow" },
-    { name = "pymupdf" },
-    { name = "requests" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "beautifulsoup4", specifier = ">=4.14.3" },
-    { name = "liteparse", specifier = ">=2.0.0" },
-    { name = "lxml", specifier = ">=6.1.0" },
-    { name = "mlx-vlm", specifier = ">=0.6.4" },
-    { name = "pillow", specifier = ">=12.1.1" },
-    { name = "pymupdf", specifier = ">=1.28.0" },
-    { name = "requests", specifier = ">=2.33.1" },
 ]
 
 [[package]]

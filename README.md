@@ -29,7 +29,7 @@ The bilingual output includes an `원본 보기` mode with English on the left a
 ## Features
 
 - Uses ar5iv HTML instead of PDF parsing.
-- Converts PDF-only papers into reading-order HTML with inline table, chart, and figure crops using Unlimited-OCR MXFP8 grounding.
+- Classifies PDFs with `pdf-inspector`, preserves native text when available, and uses Unlimited-OCR MXFP8 only for pages that need OCR.
 - Masks HTML tags before calling the model, then restores the exact tags after translation.
 - Sends only translatable text blocks to the model.
 - Keeps `figure.ltx_table` table HTML unchanged to save tokens and avoid breaking tables.
@@ -256,7 +256,7 @@ uv sync
   --layout-model sahilchachra/unlimited-ocr-mxfp8-mlx
 ```
 
-Use `--layout-backend native` for fast PyMuPDF geometry on born-digital PDFs, or `--layout-backend liteparse` for the old full-page-image fallback.
+The default `auto` backend uses `pdf-inspector` for page-level routing: born-digital pages use native PDF text and geometry, while scanned or broken-text pages use Unlimited-OCR. Use `--layout-backend native` or `--layout-backend unlimited-ocr-mlx` only to force one path.
 
 ## Re-apply Viewer Style or Restore Tables
 
