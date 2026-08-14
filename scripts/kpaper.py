@@ -41,6 +41,26 @@ def emit(args: argparse.Namespace, payload: dict[str, Any], message: str) -> Non
         print(message)
 
 
+def emit_progress(
+    enabled: bool,
+    stage: str,
+    current: int,
+    total: int,
+    label: str,
+    detail: str = "",
+) -> None:
+    if not enabled:
+        return
+    payload = {
+        "stage": stage,
+        "current": current,
+        "total": total,
+        "label": label,
+        "detail": detail,
+    }
+    print("KPAPER_PROGRESS " + json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
+
+
 def fail(message: str, hint: str | None = None, code: int = 2) -> None:
     print(f"error: {message}", file=sys.stderr)
     if hint:
@@ -297,6 +317,7 @@ def pdf_to_source_html(
     layout_model: str,
     layout_max_tokens: int,
     dry_run: bool,
+    progress_enabled: bool = False,
 ) -> dict[str, Any]:
     if dry_run:
         return {
@@ -319,6 +340,7 @@ def pdf_to_source_html(
     ocr_page_indices: set[int] = set()
     effective_layout_backend = layout_backend
     if layout_backend == "auto":
+        emit_progress(progress_enabled, "inspect", 0, 1, "PDF 유형 판별 중")
         classification = classify_pdf_for_ocr(pdf_path)
         ocr_page_indices = set(classification["pages_needing_ocr"])
         if not ocr_page_indices:
@@ -327,6 +349,14 @@ def pdf_to_source_html(
             effective_layout_backend = "unlimited-ocr-mlx"
         else:
             effective_layout_backend = "hybrid"
+        emit_progress(
+            progress_enabled,
+            "inspect",
+            1,
+            1,
+            "PDF 유형 판별 완료",
+            f"{classification['pdf_type']} · OCR {len(ocr_page_indices)}페이지",
+        )
 
     LiteParse = load_liteparse()
     parser_kwargs: dict[str, Any] = {
@@ -356,6 +386,14 @@ def pdf_to_source_html(
     pages = getattr(parsed, "pages", [])
     image_paths = write_liteparse_screenshots(shots, assets_dir)
     selected_pages = max(len(pages), len(image_paths))
+    emit_progress(
+        progress_enabled,
+        "layout",
+        0,
+        selected_pages,
+        "페이지 구조 분석 시작",
+        effective_layout_backend,
+    )
 
     for page_index in range(selected_pages):
         page = pages[page_index] if page_index < len(pages) else {}
@@ -448,6 +486,20 @@ def pdf_to_source_html(
   {page_html}
 </section>
 """.strip()
+        )
+        if layout_backend == "liteparse":
+            page_backend = "LiteParse"
+        elif layout_backend == "unlimited-ocr-mlx" or page_index in ocr_page_indices:
+            page_backend = "Unlimited-OCR"
+        else:
+            page_backend = "원문 텍스트"
+        emit_progress(
+            progress_enabled,
+            "layout",
+            page_index + 1,
+            selected_pages,
+            f"페이지 {page_index + 1}/{selected_pages} 분석",
+            page_backend,
         )
 
     document_title = html.escape(title or paper_id)
@@ -555,6 +607,7 @@ def command_pdf_import(args: argparse.Namespace) -> None:
         layout_model=args.layout_model,
         layout_max_tokens=args.layout_max_tokens,
         dry_run=args.dry_run,
+        progress_enabled=args.progress,
     )
     payload = {
         "ok": True,
@@ -767,6 +820,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_common_flags(pdf_import)
+    pdf_import.add_argument(
+        "--progress",
+        action="store_true",
+        help="stream machine-readable KPAPER_PROGRESS events before the final result",
+    )
     pdf_import.add_argument("--paper-id", required=True)
     pdf_import.add_argument("--pdf-url", default="", help="remote PDF URL; Hugging Face /blob/... URLs are normalized to /resolve/...")
     pdf_import.add_argument("--pdf", default="", help="local PDF path; defaults to inputs/pdfs/<paper-id>.pdf")

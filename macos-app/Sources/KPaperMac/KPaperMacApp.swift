@@ -47,6 +47,9 @@ struct TranslationJob: Identifiable {
     var progressCompleted: Int = 0
     var progressTotal: Int = 0
     var progressLabel: String = "준비 중"
+    var progressPhase: String = "preparing"
+    var progressDetail: String = ""
+    var startedAt: Date = .now
     var logText: String = ""
 }
 
@@ -363,10 +366,21 @@ struct WorkspaceView: View {
             Spacer()
 
             HStack {
-                Text(model.progressLabel)
-                    .font(.system(size: 12))
-                    .foregroundStyle(WorkspacePalette.secondaryText)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.progressLabel)
+                        .font(.system(size: 12, weight: .medium))
+                    if !model.progressDetail.isEmpty {
+                        Text(model.progressDetail)
+                            .font(.system(size: 11))
+                            .foregroundStyle(WorkspacePalette.secondaryText)
+                    }
+                }
                 Spacer()
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(elapsedText(at: context.date))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(WorkspacePalette.tertiaryText)
+                }
                 Button("취소") { model.cancel() }
                     .buttonStyle(WorkspaceSecondaryButtonStyle())
             }
@@ -387,7 +401,7 @@ struct WorkspaceView: View {
                 Text(model.progressTotal > 0 ? "\(Int(model.progressFraction * 100))%" : "…")
                     .font(.system(size: 32, weight: .semibold, design: .rounded))
                     .tracking(-1)
-                Text("번역 중")
+                Text(progressPhaseTitle)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(WorkspacePalette.secondaryText)
             }
@@ -395,18 +409,57 @@ struct WorkspaceView: View {
         .frame(width: 150, height: 150)
         .animation(reduceMotion ? .linear(duration: 0.1) : .spring(response: 0.4, dampingFraction: 1), value: model.progressFraction)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("번역 진행률")
+        .accessibilityLabel("\(progressPhaseTitle) 진행률")
         .accessibilityValue(model.progressTotal > 0 ? "\(Int(model.progressFraction * 100))퍼센트" : "준비 중")
+    }
+
+    private func elapsedText(at date: Date) -> String {
+        let seconds = max(0, Int(date.timeIntervalSince(model.workflowStartedAt)))
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
     private var progressTimeline: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TimelineRow(title: "문서 가져오기", detail: "완료", state: .complete)
-            TimelineRow(title: "구조 분석", detail: "완료", state: .complete)
-            TimelineRow(title: "번역", detail: model.progressLabel, state: .current)
-            TimelineRow(title: "문서 스타일 적용", detail: "대기 중", state: .pending, showsLine: false)
+            TimelineRow(title: "PDF 검사", detail: timelineDetail(for: 0), state: timelineState(for: 0))
+            TimelineRow(title: "구조 추출", detail: timelineDetail(for: 1), state: timelineState(for: 1))
+            TimelineRow(title: "번역", detail: timelineDetail(for: 2), state: timelineState(for: 2))
+            TimelineRow(title: "문서 스타일 적용", detail: timelineDetail(for: 3), state: timelineState(for: 3), showsLine: false)
         }
         .frame(maxWidth: 280)
+    }
+
+    private var progressPhaseRank: Int {
+        switch model.progressPhase {
+        case "inspect", "preparing": return 0
+        case "layout": return 1
+        case "translate": return 2
+        case "restyle": return 3
+        case "complete": return 4
+        default: return 0
+        }
+    }
+
+    private var progressPhaseTitle: String {
+        switch model.progressPhase {
+        case "inspect": return "PDF 검사"
+        case "layout": return "구조 추출"
+        case "translate": return "번역 중"
+        case "restyle": return "마무리"
+        case "complete": return "완료"
+        default: return "준비 중"
+        }
+    }
+
+    private func timelineState(for rank: Int) -> TimelineState {
+        if rank < progressPhaseRank { return .complete }
+        if rank == progressPhaseRank && model.progressPhase != "complete" { return .current }
+        return .pending
+    }
+
+    private func timelineDetail(for rank: Int) -> String {
+        if rank < progressPhaseRank || model.progressPhase == "complete" { return "완료" }
+        if rank == progressPhaseRank { return model.progressLabel }
+        return "대기 중"
     }
 
     private var readerScreen: some View {
@@ -1778,6 +1831,9 @@ final class TranslatorModel: ObservableObject {
     @Published var progressCompleted = 0
     @Published var progressTotal = 0
     @Published var progressLabel = "준비 중"
+    @Published var progressPhase = "preparing"
+    @Published var progressDetail = ""
+    @Published var workflowStartedAt = Date()
     @Published private(set) var jobs: [TranslationJob] = []
     @Published private(set) var selectedWorkflowID: UUID?
 
@@ -1889,7 +1945,7 @@ final class TranslatorModel: ObservableObject {
         let title = url.deletingPathExtension().lastPathComponent
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] workflowID in
-            var importArguments = ["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--json"]
+            var importArguments = ["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--progress", "--json"]
             if settings.useAdvancedPDFLayout {
                 importArguments += [
                     "--layout-backend", "auto",
@@ -2106,6 +2162,9 @@ final class TranslatorModel: ObservableObject {
         progressCompleted = 0
         progressTotal = 0
         progressLabel = "준비 중"
+        progressPhase = "preparing"
+        progressDetail = ""
+        workflowStartedAt = Date()
         statusText = "\(title) 실행 중"
         syncRunningState(status: "\(title) 실행 중")
         appendLog("paper_id=\(paperID.isEmpty ? "-" : paperID)", workflowID: workflowID)
@@ -2129,6 +2188,9 @@ final class TranslatorModel: ObservableObject {
     }
 
     private func runCommand(_ arguments: [String], settings: RuntimeSettings, workflowID: UUID) async throws {
+        DispatchQueue.main.async {
+            self.beginCommand(arguments.first ?? "", workflowID: workflowID)
+        }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 let script = URL(fileURLWithPath: settings.repoPath).appendingPathComponent("scripts/kpaper.py")
@@ -2267,6 +2329,9 @@ final class TranslatorModel: ObservableObject {
         progressCompleted = job.progressCompleted
         progressTotal = job.progressTotal
         progressLabel = job.progressLabel
+        progressPhase = job.progressPhase
+        progressDetail = job.progressDetail
+        workflowStartedAt = job.startedAt
         logText = job.logText
     }
 
@@ -2275,12 +2340,22 @@ final class TranslatorModel: ObservableObject {
         updateJob(workflowID) { job in
             job.statusText = status
             job.isRunning = false
+            if status == "완료" {
+                job.progressPhase = "complete"
+                job.progressCompleted = max(job.progressTotal, job.progressCompleted)
+                job.progressLabel = "완료"
+            }
             if let logLine { Self.append(logLine, to: &job.logText) }
         }
         if selectedWorkflowID == workflowID {
             statusText = status
             if let job = jobs.first(where: { $0.id == workflowID }) {
                 logText = job.logText
+                progressPhase = job.progressPhase
+                progressCompleted = job.progressCompleted
+                progressTotal = job.progressTotal
+                progressLabel = job.progressLabel
+                progressDetail = job.progressDetail
             }
         }
         syncRunningState(status: status)
@@ -2330,15 +2405,84 @@ final class TranslatorModel: ObservableObject {
         Self.append(line, to: &logText)
     }
 
+    private func beginCommand(_ command: String, workflowID: UUID) {
+        let phase: String
+        let label: String
+        switch command {
+        case "pdf-import":
+            phase = "inspect"
+            label = "PDF 검사 시작"
+        case "translate":
+            phase = "translate"
+            label = "번역 준비 중"
+        case "restyle":
+            phase = "restyle"
+            label = "문서 스타일 적용 중"
+        default:
+            phase = "preparing"
+            label = "준비 중"
+        }
+        updateJob(workflowID) { job in
+            job.progressPhase = phase
+            job.progressCompleted = 0
+            job.progressTotal = 0
+            job.progressLabel = label
+            job.progressDetail = ""
+        }
+        guard selectedWorkflowID == workflowID else { return }
+        progressPhase = phase
+        progressCompleted = 0
+        progressTotal = 0
+        progressLabel = label
+        progressDetail = ""
+    }
+
+    private static func structuredProgress(from line: String) -> (String, Int, Int, String, String)? {
+        let prefix = "KPAPER_PROGRESS "
+        guard line.hasPrefix(prefix) else { return nil }
+        let json = String(line.dropFirst(prefix.count))
+        guard let data = json.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let stage = payload["stage"] as? String,
+              let label = payload["label"] as? String else {
+            return nil
+        }
+        return (
+            stage,
+            payload["current"] as? Int ?? 0,
+            payload["total"] as? Int ?? 0,
+            label,
+            payload["detail"] as? String ?? ""
+        )
+    }
+
     private func updateProgress(from text: String) {
         for rawLine in text.split(whereSeparator: \.isNewline) {
             let line = String(rawLine)
+            if let event = Self.structuredProgress(from: line) {
+                progressPhase = event.0
+                progressCompleted = event.1
+                progressTotal = event.2
+                progressLabel = event.3
+                progressDetail = event.4
+                continue
+            }
+            if let marker = line.range(of: "translating "),
+               let total = Int(line[marker.upperBound...].split(separator: " ").first ?? "") {
+                progressPhase = "translate"
+                progressCompleted = 0
+                progressTotal = total
+                progressLabel = "번역 청크 0/\(total)"
+                progressDetail = "모델 요청 준비 완료"
+                continue
+            }
             guard let marker = line.range(of: "completed batch ") else { continue }
             let batchToken = line[marker.upperBound...].split(separator: " ").first ?? ""
             let batchParts = batchToken.split(separator: "/")
             guard batchParts.count == 2, let total = Int(batchParts[1]) else { continue }
             progressTotal = total
             progressCompleted = min(total, progressCompleted + 1)
+            progressPhase = "translate"
             progressLabel = "번역 청크 \(progressCompleted)/\(total)"
         }
     }
@@ -2346,12 +2490,30 @@ final class TranslatorModel: ObservableObject {
     private static func updateProgress(from text: String, job: inout TranslationJob) {
         for rawLine in text.split(whereSeparator: \.isNewline) {
             let line = String(rawLine)
+            if let event = structuredProgress(from: line) {
+                job.progressPhase = event.0
+                job.progressCompleted = event.1
+                job.progressTotal = event.2
+                job.progressLabel = event.3
+                job.progressDetail = event.4
+                continue
+            }
+            if let marker = line.range(of: "translating "),
+               let total = Int(line[marker.upperBound...].split(separator: " ").first ?? "") {
+                job.progressPhase = "translate"
+                job.progressCompleted = 0
+                job.progressTotal = total
+                job.progressLabel = "번역 청크 0/\(total)"
+                job.progressDetail = "모델 요청 준비 완료"
+                continue
+            }
             guard let marker = line.range(of: "completed batch ") else { continue }
             let batchToken = line[marker.upperBound...].split(separator: " ").first ?? ""
             let batchParts = batchToken.split(separator: "/")
             guard batchParts.count == 2, let total = Int(batchParts[1]) else { continue }
             job.progressTotal = total
             job.progressCompleted = min(total, job.progressCompleted + 1)
+            job.progressPhase = "translate"
             job.progressLabel = "번역 청크 \(job.progressCompleted)/\(total)"
         }
     }
