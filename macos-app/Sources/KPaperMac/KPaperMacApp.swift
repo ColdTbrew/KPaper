@@ -2489,7 +2489,11 @@ final class TranslatorModel: ObservableObject {
                 progressCompleted = 0
                 progressTotal = total
                 progressLabel = "번역 청크 0/\(total)"
-                progressDetail = "모델 요청 준비 완료"
+                progressDetail = ""
+                continue
+            }
+            if line.contains("retrying one by one") {
+                progressDetail = "일부 문단을 다시 번역하고 있습니다."
                 continue
             }
             guard let marker = line.range(of: "completed batch ") else { continue }
@@ -2500,6 +2504,7 @@ final class TranslatorModel: ObservableObject {
             progressCompleted = min(total, progressCompleted + 1)
             progressPhase = "translate"
             progressLabel = "번역 청크 \(progressCompleted)/\(total)"
+            progressDetail = ""
         }
     }
 
@@ -2523,7 +2528,11 @@ final class TranslatorModel: ObservableObject {
                 job.progressCompleted = 0
                 job.progressTotal = total
                 job.progressLabel = "번역 청크 0/\(total)"
-                job.progressDetail = "모델 요청 준비 완료"
+                job.progressDetail = ""
+                continue
+            }
+            if line.contains("retrying one by one") {
+                job.progressDetail = "일부 문단을 다시 번역하고 있습니다."
                 continue
             }
             guard let marker = line.range(of: "completed batch ") else { continue }
@@ -2534,6 +2543,7 @@ final class TranslatorModel: ObservableObject {
             job.progressCompleted = min(total, job.progressCompleted + 1)
             job.progressPhase = "translate"
             job.progressLabel = "번역 청크 \(job.progressCompleted)/\(total)"
+            job.progressDetail = ""
         }
     }
 
