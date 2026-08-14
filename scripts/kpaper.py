@@ -372,6 +372,9 @@ def pdf_to_source_html(
     page_sections: list[str] = []
     text_blocks = 0
     visual_blocks = 0
+    figure_blocks = 0
+    table_blocks = 0
+    formula_blocks = 0
     layout_fallbacks: list[dict[str, Any]] = []
     layout_engine = (
         pdf_layout.UnlimitedOCRMLX(model_id=layout_model, max_tokens=layout_max_tokens)
@@ -429,6 +432,17 @@ def pdf_to_source_html(
                 layout_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
                 raw_layout = ""
             if layout_blocks:
+                table_blocks += sum(1 for block in layout_blocks if "table" in block.kind)
+                figure_blocks += sum(
+                    1
+                    for block in layout_blocks
+                    if pdf_layout.is_visual_block(block) and "table" not in block.kind
+                )
+                formula_blocks += sum(
+                    1
+                    for block in layout_blocks
+                    if any(part in block.kind for part in ("formula", "equation", "math"))
+                )
                 page_html, page_visuals = pdf_layout.render_layout_page(
                     layout_blocks,
                     page_image=page_image,
@@ -502,6 +516,16 @@ def pdf_to_source_html(
             page_backend,
         )
 
+    structure_summary = f"그림 {figure_blocks}개 · 표 {table_blocks}개 · 수식 {formula_blocks}개"
+    emit_progress(
+        progress_enabled,
+        "layout",
+        selected_pages,
+        selected_pages,
+        "문서 구조 분석 완료",
+        structure_summary,
+    )
+
     document_title = html.escape(title or paper_id)
     page_sections_html = "\n".join(page_sections)
     source_html = f"""<!doctype html>
@@ -528,6 +552,9 @@ def pdf_to_source_html(
         "images": len(image_paths),
         "text_blocks": text_blocks,
         "visual_blocks": visual_blocks,
+        "figures": figure_blocks,
+        "tables": table_blocks,
+        "formulas": formula_blocks,
         "parser": "pdf-inspector+liteparse+pymupdf-layout" if layout_backend == "auto" else (
             "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python"
         ),

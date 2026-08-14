@@ -49,6 +49,7 @@ struct TranslationJob: Identifiable {
     var progressLabel: String = "준비 중"
     var progressPhase: String = "preparing"
     var progressDetail: String = ""
+    var documentStructureSummary: String = ""
     var startedAt: Date = .now
 }
 
@@ -376,9 +377,6 @@ struct WorkspaceView: View {
                     Text(model.lastPaperID.isEmpty ? "선택한 논문" : model.lastPaperID)
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
-                    Text("구조 보존 한국어 번역")
-                        .font(.system(size: 12))
-                        .foregroundStyle(WorkspacePalette.secondaryText)
                 }
                 Spacer()
             }
@@ -388,15 +386,10 @@ struct WorkspaceView: View {
                 progressTimeline
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("구조 보존 상태")
-                    .font(.system(size: 13, weight: .semibold))
-                HStack(spacing: 10) {
-                    PreservationCard(title: "그림", icon: "photo", state: "보존 중")
-                    PreservationCard(title: "표", icon: "tablecells", state: "보존 중")
-                    PreservationCard(title: "수식", icon: "function", state: "보존 중")
-                    PreservationCard(title: "인용", icon: "quote.opening", state: "보존 중")
-                }
+            if !model.documentStructureSummary.isEmpty {
+                Label(model.documentStructureSummary, systemImage: "doc.text.magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(WorkspacePalette.secondaryText)
             }
 
             Spacer()
@@ -1005,29 +998,6 @@ private struct DividerLabel: View {
                 .foregroundStyle(WorkspacePalette.tertiaryText)
             Rectangle().fill(WorkspacePalette.border).frame(height: 1)
         }
-    }
-}
-
-private struct PreservationCard: View {
-    let title: String
-    let icon: String
-    let state: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-            Label(state, systemImage: "checkmark.circle.fill")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(WorkspacePalette.success)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(WorkspacePalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(WorkspacePalette.border))
     }
 }
 
@@ -1843,6 +1813,7 @@ final class TranslatorModel: ObservableObject {
     @Published var progressLabel = "준비 중"
     @Published var progressPhase = "preparing"
     @Published var progressDetail = ""
+    @Published var documentStructureSummary = ""
     @Published var workflowStartedAt = Date()
     @Published private(set) var jobs: [TranslationJob] = []
     @Published private(set) var selectedWorkflowID: UUID?
@@ -2181,6 +2152,7 @@ final class TranslatorModel: ObservableObject {
         progressLabel = "준비 중"
         progressPhase = "preparing"
         progressDetail = ""
+        documentStructureSummary = ""
         workflowStartedAt = Date()
         statusText = "\(title) 실행 중"
         syncRunningState(status: "\(title) 실행 중")
@@ -2349,6 +2321,7 @@ final class TranslatorModel: ObservableObject {
         progressLabel = job.progressLabel
         progressPhase = job.progressPhase
         progressDetail = job.progressDetail
+        documentStructureSummary = job.documentStructureSummary
         workflowStartedAt = job.startedAt
     }
 
@@ -2381,6 +2354,7 @@ final class TranslatorModel: ObservableObject {
                 progressTotal = job.progressTotal
                 progressLabel = job.progressLabel
                 progressDetail = job.progressDetail
+                documentStructureSummary = job.documentStructureSummary
             }
         }
         syncRunningState(status: status)
@@ -2504,6 +2478,9 @@ final class TranslatorModel: ObservableObject {
                 progressTotal = event.2
                 progressLabel = event.3
                 progressDetail = event.4
+                if event.3 == "문서 구조 분석 완료" {
+                    documentStructureSummary = event.4
+                }
                 continue
             }
             if let marker = line.range(of: "translating "),
@@ -2535,6 +2512,9 @@ final class TranslatorModel: ObservableObject {
                 job.progressTotal = event.2
                 job.progressLabel = event.3
                 job.progressDetail = event.4
+                if event.3 == "문서 구조 분석 완료" {
+                    job.documentStructureSummary = event.4
+                }
                 continue
             }
             if let marker = line.range(of: "translating "),
