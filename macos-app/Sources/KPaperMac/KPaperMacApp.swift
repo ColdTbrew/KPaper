@@ -358,8 +358,10 @@ struct WorkspaceView: View {
         VStack(alignment: .leading, spacing: 28) {
             screenHeader(
                 step: "2",
-                title: "번역 진행 중",
-                subtitle: "문서 구조를 보존하며 한국어로 번역하고 있습니다."
+                title: model.progressPhase == "failed" ? "번역을 완료하지 못했습니다" : "번역 진행 중",
+                subtitle: model.progressPhase == "failed"
+                    ? "설정을 확인한 뒤 다시 시도해주세요."
+                    : "문서 구조를 보존하며 한국어로 번역하고 있습니다."
             )
 
             HStack(spacing: 14) {
@@ -415,8 +417,10 @@ struct WorkspaceView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(WorkspacePalette.tertiaryText)
                 }
-                Button("취소") { model.cancel() }
-                    .buttonStyle(WorkspaceSecondaryButtonStyle())
+                if model.selectedWorkflowIsRunning {
+                    Button("취소") { model.cancel() }
+                        .buttonStyle(WorkspaceSecondaryButtonStyle())
+                }
             }
         }
         .padding(.horizontal, 42)
@@ -469,6 +473,7 @@ struct WorkspaceView: View {
         case "translate": return 2
         case "restyle": return 3
         case "complete": return 4
+        case "failed": return 2
         default: return 0
         }
     }
@@ -480,6 +485,7 @@ struct WorkspaceView: View {
         case "translate": return "번역 중"
         case "restyle": return "마무리"
         case "complete": return "완료"
+        case "failed": return "오류"
         default: return "준비 중"
         }
     }
@@ -2026,7 +2032,9 @@ final class TranslatorModel: ObservableObject {
 
     func cancel() {
         guard let workflowID = selectedWorkflowID else { return }
-        currentProcesses[workflowID]?.terminate()
+        if let process = currentProcesses[workflowID] {
+            Self.terminateProcessTree(process)
+        }
         currentProcesses[workflowID] = nil
         updateJob(workflowID) { job in
             job.statusText = "중지됨"
@@ -2189,7 +2197,8 @@ final class TranslatorModel: ObservableObject {
                     self.finishWorkflow(
                         workflowID,
                         status: wasCancelled ? "중지됨" : "실패",
-                        logLine: wasCancelled ? nil : "error: \(error.localizedDescription)"
+                        logLine: wasCancelled ? nil : "error: \(error.localizedDescription)",
+                        userMessage: wasCancelled ? nil : error.localizedDescription
                     )
                 }
             }
@@ -2269,7 +2278,7 @@ final class TranslatorModel: ObservableObject {
                         }
                         continuation.resume()
                     } else {
-                        continuation.resume(throwing: AppError.message("command exited with status \(process.terminationStatus)"))
+                        continuation.resume(throwing: AppError.message(Self.userFacingCommandError(from: commandOutput)))
                     }
                 } catch {
                     pipe.fileHandleForReading.readabilityHandler = nil
@@ -2343,7 +2352,12 @@ final class TranslatorModel: ObservableObject {
         workflowStartedAt = job.startedAt
     }
 
-    private func finishWorkflow(_ workflowID: UUID, status: String, logLine: String?) {
+    private func finishWorkflow(
+        _ workflowID: UUID,
+        status: String,
+        logLine: String?,
+        userMessage: String? = nil
+    ) {
         currentProcesses[workflowID] = nil
         updateJob(workflowID) { job in
             job.statusText = status
@@ -2352,6 +2366,10 @@ final class TranslatorModel: ObservableObject {
                 job.progressPhase = "complete"
                 job.progressCompleted = max(job.progressTotal, job.progressCompleted)
                 job.progressLabel = "완료"
+            } else if status == "실패" {
+                job.progressPhase = "failed"
+                job.progressLabel = userMessage ?? "번역을 완료하지 못했습니다."
+                job.progressDetail = "설정 또는 서비스 상태를 확인한 뒤 다시 시도해주세요."
             }
         }
         if let logLine { DebugLogStore.append(logLine, workflowID: workflowID) }
@@ -2373,6 +2391,36 @@ final class TranslatorModel: ObservableObject {
         if !isRunning || selectedWorkflowID == nil {
             statusText = status
         }
+    }
+
+    private static func userFacingCommandError(from output: String) -> String {
+        let lowercased = output.lowercased()
+        if lowercased.contains("503") || lowercased.contains("service unavailable") {
+            return "번역 서비스 API가 정상적이지 않습니다. 잠시 후 다시 시도해주세요."
+        }
+        if lowercased.contains("401") || lowercased.contains("unauthorized") || lowercased.contains("authentication") {
+            return "번역 서비스 인증에 실패했습니다. API 키를 확인해주세요."
+        }
+        if lowercased.contains("429") || lowercased.contains("too many requests") || lowercased.contains("rate limit") {
+            return "번역 요청이 너무 많습니다. 잠시 후 다시 시도해주세요."
+        }
+        if lowercased.contains("timed out") || lowercased.contains("timeout") {
+            return "번역 서비스 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
+        }
+        if lowercased.contains("connection refused") || lowercased.contains("connection error") || lowercased.contains("failed to establish") {
+            return "번역 서비스 API에 연결할 수 없습니다. 서버 주소와 실행 상태를 확인해주세요."
+        }
+        return "번역 중 오류가 발생했습니다. 번역 서비스 설정을 확인해주세요."
+    }
+
+    private static func terminateProcessTree(_ process: Process) {
+        guard process.isRunning else { return }
+        let children = Process()
+        children.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        children.arguments = ["-TERM", "-P", String(process.processIdentifier)]
+        try? children.run()
+        children.waitUntilExit()
+        process.terminate()
     }
 
     private func updateJob(_ workflowID: UUID, change: (inout TranslationJob) -> Void) {
