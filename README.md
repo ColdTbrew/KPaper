@@ -119,6 +119,12 @@ OPENAI_BASE_URL=http://host:port/v1
 
 CLI의 기본 provider는 `api`이며 기본 모델은 `gpt-5.4-mini`입니다. 앱 설정에서 API 주소·모델·임시 API 키를 지정할 수 있고, 입력을 비우면 `.env` 값을 사용합니다. 논문 질문 기능은 API 설정과 별개로 Codex 로그인이 필요합니다.
 
+### 앱 내려받기
+
+[GitHub 릴리스](https://github.com/ColdTbrew/KPaper/releases/latest)에서 Apple Silicon Mac용 DMG 또는 ZIP을 내려받을 수 있습니다. DMG에서 `KPaper.app`을 Applications 폴더로 복사하세요.
+
+배포 앱은 Python 번역·OCR 엔진을 내장하지 않습니다. 저장소를 내려받고 `uv sync`로 실행 환경을 준비한 뒤, 앱 설정의 프로젝트 경로를 해당 저장소 폴더로 지정해야 합니다. 앱은 ad hoc 서명이며 Apple 공증은 적용하지 않았습니다.
+
 ### 앱 빌드
 
 ```bash
@@ -131,6 +137,8 @@ open dist/KPaper.app
 ```bash
 KPAPER_SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)" ./scripts/build_macos_app.sh
 ```
+
+배포용 DMG·ZIP과 SHA-256 체크섬은 `./scripts/package_macos_release.sh`로 생성합니다.
 
 명시한 SDK는 자동으로 바꾸지 않습니다. 생성한 앱은 로컬 사용용이며 App Store 배포·공증을 뜻하지 않습니다.
 
