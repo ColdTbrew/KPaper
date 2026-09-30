@@ -172,7 +172,14 @@ struct WorkspaceView: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 9) {
+                Image(systemName: "book.closed.fill").font(.system(size: 17, weight: .medium))
+                    .accessibilityHidden(true)
+                Text("KPaper").font(.system(size: 17, weight: .semibold)).tracking(-0.4)
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 22)
             SidebarButton(title: "새 번역", icon: "plus", isSelected: destination == .translation) {
                 destination = .translation
                 stage = .importDocument
@@ -222,18 +229,17 @@ struct WorkspaceView: View {
 
             Spacer()
 
-            HStack(spacing: 8) {
-                Image(systemName: "questionmark.circle")
-                Text("도움말")
-            }
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(WorkspacePalette.secondaryText)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
+            Divider().padding(.horizontal, 12)
+            Text("논문을 읽는 작업 공간")
+                .font(.system(size: 11))
+                .foregroundStyle(WorkspacePalette.secondaryText)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
         }
+        .padding(.horizontal, 10)
         .padding(.bottom, 14)
-        .padding(.top, 46)
-        .frame(width: 156, alignment: .topLeading)
+        .padding(.top, 34)
+        .frame(width: 184, alignment: .topLeading)
         .background(WorkspacePalette.sidebar)
     }
 
@@ -300,9 +306,9 @@ struct WorkspaceView: View {
                 .buttonStyle(WorkspacePrimaryButtonStyle())
                 .disabled(importMode == .web && sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .frame(maxWidth: 540, alignment: .leading)
-            .padding(.horizontal, 42)
-            .padding(.vertical, 34)
+            .frame(maxWidth: 600, alignment: .leading)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 32)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
@@ -312,7 +318,8 @@ struct WorkspaceView: View {
             Text("논문 링크")
                 .font(.system(size: 13, weight: .semibold))
             HStack(spacing: 8) {
-                TextField("https://arxiv.org/abs/...", text: $sourceURL)
+                TextField("https://arxiv.org/abs/…", text: $sourceURL)
+                    .accessibilityLabel("논문 링크")
                     .textFieldStyle(WorkspaceTextFieldStyle())
                     .onSubmit { model.translateURL(sourceURL) }
                 Button {
@@ -323,6 +330,7 @@ struct WorkspaceView: View {
                 }
                 .buttonStyle(WorkspaceIconButtonStyle())
                 .help("클립보드에서 붙여넣기")
+                .accessibilityLabel("클립보드 링크 붙여넣기")
             }
 
             DividerLabel(text: "또는")
@@ -373,6 +381,7 @@ struct WorkspaceView: View {
     }
 
     private var progressScreen: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 28) {
             screenHeader(
                 step: "2",
@@ -439,8 +448,11 @@ struct WorkspaceView: View {
                 }
             }
         }
-        .padding(.horizontal, 42)
-        .padding(.vertical, 34)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 32)
+        .frame(maxWidth: 760, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
     }
 
     private var progressRing: some View {
@@ -545,6 +557,7 @@ struct WorkspaceView: View {
                     Image(systemName: "sidebar.left")
                 }
                 .help("목차 접기 / 펼치기")
+                .accessibilityLabel(readerOutlineVisible ? "목차 접기" : "목차 펼치기")
                 .buttonStyle(WorkspaceIconButtonStyle())
 
                 Picker("보기", selection: $readerMode) {
@@ -562,6 +575,7 @@ struct WorkspaceView: View {
                 .buttonStyle(WorkspaceIconButtonStyle())
                 .keyboardShortcut("f", modifiers: .command)
                 .help("본문 검색 (⌘F)")
+                .accessibilityLabel("본문 검색")
 
                 Spacer()
 
@@ -569,14 +583,15 @@ struct WorkspaceView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(WorkspacePalette.secondaryText)
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(readerPaperID)
 
                 Button("브라우저로 열기") { model.openOutput(kind: .bilingual) }
                     .buttonStyle(WorkspaceSecondaryButtonStyle())
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .padding(.top, 6)
-            .background(.thinMaterial)
+            .padding(.vertical, 10)
+            .background(WorkspacePalette.panel)
 
             Divider()
 
@@ -587,13 +602,20 @@ struct WorkspaceView: View {
                         .focused($readerFindFocused)
                         .onSubmit { readerFindBackwards = false; readerFindRequest += 1 }
                         .onChange(of: readerFindQuery) { _ in readerFindBackwards = false; readerFindRequest += 1 }
-                    Text("\(readerFindCount)개").font(.caption).foregroundStyle(.secondary)
+                    Text("\(readerFindCount)개").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        .frame(minWidth: 42)
                     Button { readerFindBackwards = true; readerFindRequest += 1 } label: { Image(systemName: "chevron.up") }
                         .help("이전 검색 결과")
+                        .accessibilityLabel("이전 검색 결과")
+                        .buttonStyle(WorkspaceIconButtonStyle())
                     Button { readerFindBackwards = false; readerFindRequest += 1 } label: { Image(systemName: "chevron.down") }
                         .help("다음 검색 결과")
+                        .accessibilityLabel("다음 검색 결과")
+                        .buttonStyle(WorkspaceIconButtonStyle())
                     Button { readerFindVisible = false } label: { Image(systemName: "xmark") }
                         .help("검색 닫기")
+                        .accessibilityLabel("검색 닫기")
+                        .buttonStyle(WorkspaceIconButtonStyle())
                 }
                 .padding(10)
             }
@@ -664,8 +686,8 @@ struct WorkspaceView: View {
             }
             Spacer()
         }
-        .padding(.horizontal, 42)
-        .padding(.vertical, 34)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 32)
         .onAppear(perform: reloadOutputDocuments)
     }
 
@@ -758,8 +780,8 @@ struct WorkspaceView: View {
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(WorkspacePalette.border))
             }
         }
-        .padding(.horizontal, 42)
-        .padding(.vertical, 34)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 32)
         .onAppear(perform: reloadOutputDocuments)
     }
 
@@ -885,8 +907,8 @@ struct WorkspaceView: View {
                         .buttonStyle(.link)
                 }
             }
-            .padding(.horizontal, 42)
-            .padding(.vertical, 34)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 32)
         }
     }
 
@@ -894,11 +916,12 @@ struct WorkspaceView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 9) {
                 Text(step.map { "\($0). \(title)" } ?? title)
-                    .font(.system(size: 19, weight: .bold))
+                    .font(.system(size: 25, weight: .semibold))
                     .tracking(-0.2)
             }
             Text(subtitle)
                 .font(.system(size: 13))
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(WorkspacePalette.secondaryText)
         }
     }
@@ -1141,14 +1164,14 @@ private struct SettingRow<Content: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 18) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
-                .frame(width: 118, alignment: .leading)
-            content
+                .foregroundStyle(WorkspacePalette.secondaryText)
+            content.frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(.vertical, 16)
     }
 }
 
@@ -1173,83 +1196,81 @@ private struct EmptyDocumentView: View {
 
 private enum WorkspacePalette {
     static let canvas = Color(nsColor: .textBackgroundColor)
-    static let sidebar = Color(nsColor: .windowBackgroundColor)
+    static let sidebar = Color(nsColor: .underPageBackgroundColor)
     static let panel = Color(nsColor: .controlBackgroundColor)
-    static let controlFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor).opacity(0.72)
-    static let border = Color(nsColor: .separatorColor).opacity(0.58)
+    static let controlFill = Color(nsColor: .quaternaryLabelColor).opacity(0.08)
+    static let border = Color(nsColor: .separatorColor).opacity(0.7)
     static let secondaryText = Color.secondary
-    static let tertiaryText = Color.secondary.opacity(0.62)
-    static let blue = Color(nsColor: .labelColor)
+    static let tertiaryText = Color.secondary.opacity(0.85)
+    static let blue = Color(nsColor: .systemBlue)
     static let success = Color(red: 0.25, green: 0.64, blue: 0.31)
+}
+
+private struct WorkspaceFieldFocus: ViewModifier {
+    @FocusState private var focused: Bool
+    func body(content: Content) -> some View {
+        content.focused($focused)
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? WorkspacePalette.blue : WorkspacePalette.border, lineWidth: focused ? 2 : 1))
+    }
 }
 
 private struct WorkspaceTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration
-            .textFieldStyle(.plain)
+        configuration.textFieldStyle(.plain)
             .font(.system(size: 13))
-            .padding(.horizontal, 11)
-            .frame(height: 38)
-            .background(WorkspacePalette.controlFill)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
+            .padding(.horizontal, 12)
+            .frame(height: 40)
+            .background(WorkspacePalette.canvas)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .modifier(WorkspaceFieldFocus())
     }
 }
 
 private struct WorkspacePrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isFocused) private var isFocused
     @Environment(\.colorScheme) private var colorScheme
     var compact = false
-
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
             .padding(.horizontal, compact ? 14 : 18)
-            .frame(height: compact ? 34 : 44)
-            .background(
-                LinearGradient(
-                    colors: [
-                        WorkspacePalette.blue.opacity(isEnabled ? (configuration.isPressed ? 0.76 : 0.94) : 0.34),
-                        WorkspacePalette.blue.opacity(isEnabled ? (configuration.isPressed ? 0.68 : 0.82) : 0.28)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: compact ? 8 : 9, style: .continuous))
-            .shadow(color: WorkspacePalette.blue.opacity(isEnabled ? 0.18 : 0), radius: 10, y: 4)
-            .scaleEffect(configuration.isPressed ? 0.975 : 1)
-            .animation(reduceMotion ? .linear(duration: 0.08) : .spring(response: 0.24, dampingFraction: 0.9), value: configuration.isPressed)
+            .frame(height: compact ? 36 : 44)
+            .background(Color(nsColor: .labelColor).opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.3))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(isFocused ? WorkspacePalette.blue : Color.clear, lineWidth: 2))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
 private struct WorkspaceSecondaryButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.isFocused) private var isFocused
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(Color.primary)
-            .padding(.horizontal, 14)
-            .frame(height: 34)
-            .background(WorkspacePalette.controlFill.opacity(configuration.isPressed ? 0.65 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
-            .scaleEffect(configuration.isPressed ? 0.975 : 1)
-            .animation(reduceMotion ? .linear(duration: 0.08) : .spring(response: 0.24, dampingFraction: 0.9), value: configuration.isPressed)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Color.primary.opacity(isEnabled ? 1 : 0.4))
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .background(configuration.isPressed ? WorkspacePalette.controlFill : WorkspacePalette.canvas)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(isFocused ? WorkspacePalette.blue : WorkspacePalette.border, lineWidth: isFocused ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
 private struct WorkspaceIconButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var isFocused
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(WorkspacePalette.secondaryText)
-            .frame(width: 38, height: 38)
-            .background(WorkspacePalette.controlFill.opacity(configuration.isPressed ? 0.62 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspacePalette.border))
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(configuration.isPressed ? Color.primary : WorkspacePalette.secondaryText)
+            .frame(width: 36, height: 36)
+            .background(configuration.isPressed ? WorkspacePalette.controlFill : WorkspacePalette.canvas)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(isFocused ? WorkspacePalette.blue : WorkspacePalette.border, lineWidth: isFocused ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
