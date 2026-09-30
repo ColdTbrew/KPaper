@@ -62,6 +62,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BIN_DIR/KPaperMac" "$MACOS_DIR/KPaperMac"
 cp "$PACKAGE_DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+cp "$ROOT_DIR/RELEASE_NOTES.md" "$RESOURCES_DIR/ReleaseNotes.md"
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
