@@ -176,7 +176,7 @@ struct PaperWebPreview: NSViewRepresentable {
         post({headings:items, current:current?.id || '', ...(!restoring && anchor ? {anchor:anchor.id, offset:top(anchor)} : {})});
       }
       window.kpaperReader = {
-        mode(value) { mode=value; document.body.classList.toggle('kpaper-native-parallel', value===1); document.querySelector('.codex_tab_button[data-target="'+(value===1?'codex-panel-parallel':'codex-panel-ko')+'"]')?.click(); if(value===1) document.scrollingElement.scrollTop=0; setTimeout(report,200); },
+        mode(value) { value = value === 1 && document.querySelector('#codex-panel-parallel') ? 1 : 0; mode=value; document.body.classList.toggle('kpaper-native-parallel', value===1); document.querySelector('.codex_tab_button[data-target="'+(value===1?'codex-panel-parallel':'codex-panel-ko')+'"]')?.click(); if(value===1) document.scrollingElement.scrollTop=0; setTimeout(report,200); },
         jump(id) {
           const roots = mode === 1 ? [...document.querySelectorAll('#codex-panel-parallel .codex_parallel_column article')] : [root()];
           for (const r of roots) {

@@ -13,14 +13,14 @@ class NativeReaderBridgeTests(unittest.TestCase):
         bridge = source.split('static let bridge = #"""', 1)[1].split('"""#', 1)[0]
         harness = r'''
 const assert = require('assert');
-const reports=[], jobs=[], clicks=[];
+const reports=[], jobs=[], clicks=[], classes=[]; let hasParallel=true;
 const heading={id:'section-one',tagName:'H4',textContent:'1. 세부 절',closest:()=>null,getBoundingClientRect:()=>({top:60})};
 const anchor={id:'paragraph-one',closest:()=>null,getClientRects:()=>[{}],getBoundingClientRect:()=>({top:60})};
 const root={closest:()=>null,innerText:'Alpha alpha beta',querySelectorAll:q=>q==='h2,h3,h4,h5,h6'?[heading]:[anchor],querySelector:()=>null};
 global.CSS={escape:x=>x};
 global.getComputedStyle=()=>({overflowY:'auto'});
 global.window={webkit:{messageHandlers:{reader:{postMessage:x=>reports.push(x)}}},addEventListener:()=>{}};
-global.document={body:{classList:{toggle:()=>{}}},head:{append:()=>{}},createElement:()=>({}),scrollingElement:{scrollTop:0},addEventListener:()=>{},querySelectorAll:()=>[],querySelector:q=>q.includes('codex_tab_button')?{click:()=>clicks.push(q)}:root};
+global.document={body:{classList:{toggle:(name,enabled)=>classes.push(enabled)}},head:{append:()=>{}},createElement:()=>({}),scrollingElement:{scrollTop:0},addEventListener:()=>{},querySelectorAll:()=>[],querySelector:q=>q==='#codex-panel-parallel'?(hasParallel?root:null):q.includes('codex_tab_button')?{click:()=>clicks.push(q)}:root};
 global.setTimeout=f=>{jobs.push(f);return jobs.length}; global.clearTimeout=()=>{};
 function flush(){while(jobs.length)jobs.shift()();}
 BRIDGE
@@ -39,6 +39,10 @@ assert.strictEqual(columns[1].scrollTop,159);
 assert.strictEqual(document.scrollingElement.scrollTop,0);
 document.querySelectorAll = () => [];
 
+hasParallel=false;
+window.kpaperReader.mode(1); flush();
+assert.strictEqual(classes.at(-1),false, 'Legacy papers must retain document scrolling');
+assert(clicks.at(-1).includes('codex-panel-ko'));
 reports.length=0;
 window.kpaperReader.restore('missing-anchor',30); flush();
 assert(reports.every(x=>!('anchor' in x)), 'Failed restore must not overwrite saved position');
