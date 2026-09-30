@@ -340,6 +340,8 @@ body.has_bilingual_view .codex_parallel_column {
   height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  overflow-anchor: none;
+  scroll-behavior: auto;
   border-left: 1px solid #eee;
 }
 body.has_bilingual_view .codex_parallel_column:first-child {
@@ -402,8 +404,15 @@ document.addEventListener("DOMContentLoaded", function () {
   let isSyncing = false;
   let lastScrolledColumn = null;
   let alignmentTimer = null;
+  let scrollFrame = null;
+  let pendingSource = null;
+  let scrollMap = [];
+  const expectedScrolls = new WeakMap();
   const scrollPositions = new Map();
   const alignmentAnchorSelector = [
+    ".ltx_para[id]",
+    "figure[id]",
+    "h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]",
     "section.ltx_section[id]",
     "section.ltx_subsection[id]",
     "section.ltx_subsubsection[id]"
@@ -436,6 +445,11 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!article) return anchors;
     Array.from(article.querySelectorAll(alignmentAnchorSelector)).forEach((element) => {
       if (element.id && !String(element.id).startsWith("codex-")) {
+        // Closed references and nested heading IDs must not become duplicate
+        // or invisible alignment points.
+        if (!element.getClientRects().length || element.getBoundingClientRect().height === 0) return;
+        if (element.matches("section") && element.querySelector(alignmentAnchorSelector)) return;
+        if (element.matches("h1,h2,h3,h4,h5,h6") && element.closest(".ltx_para[id]")) return;
         const title = Array.from(element.children).find((child) =>
           child.classList && child.classList.contains("ltx_title")
         );
@@ -491,6 +505,41 @@ document.addEventListener("DOMContentLoaded", function () {
       if (!changed) break;
     }
     captureScrollPositions();
+    rebuildScrollMap();
+  }
+  function rebuildScrollMap() {
+    if (!isParallelActive()) return;
+    const [leftColumn, rightColumn] = columns;
+    const left = collectAlignmentAnchors(leftColumn);
+    const right = collectAlignmentAnchors(rightColumn);
+    const leftMax = Math.max(0, leftColumn.scrollHeight - leftColumn.clientHeight);
+    const rightMax = Math.max(0, rightColumn.scrollHeight - rightColumn.clientHeight);
+    scrollMap = [[0, 0]];
+    left.forEach((anchor, id) => {
+      if (!right.has(id)) return;
+      const pair = [
+        clampScrollTop(leftColumn, scrollContentTop(anchor.measure, leftColumn) - 46),
+        clampScrollTop(rightColumn, scrollContentTop(right.get(id).measure, rightColumn) - 46)
+      ];
+      const previous = scrollMap[scrollMap.length - 1];
+      if (pair[0] > previous[0] && pair[1] > previous[1]) scrollMap.push(pair);
+    });
+    const last = scrollMap[scrollMap.length - 1];
+    if (leftMax > last[0] && rightMax > last[1]) scrollMap.push([leftMax, rightMax]);
+  }
+  function mappedScrollTop(source, value) {
+    const from = source === columns[0] ? 0 : 1;
+    const to = 1 - from;
+    if (scrollMap.length < 2) return value;
+    for (let index = 1; index < scrollMap.length; index += 1) {
+      const before = scrollMap[index - 1];
+      const after = scrollMap[index];
+      if (value <= after[from] || index === scrollMap.length - 1) {
+        const progress = Math.max(0, Math.min(1, (value - before[from]) / (after[from] - before[from])));
+        return before[to] + progress * (after[to] - before[to]);
+      }
+    }
+    return value;
   }
   function restoreParallelSnapshot(snapshot) {
     if (!snapshot) return;
@@ -523,33 +572,34 @@ document.addEventListener("DOMContentLoaded", function () {
     if (alignmentTimer) {
       window.clearTimeout(alignmentTimer);
     }
-    const snapshot = preservePosition && isParallelActive() ? captureViewSnapshot() : null;
+    const snapshots = preservePosition && isParallelActive()
+      ? columns.map((column) => snapshotFromContainer(column, column)) : null;
     alignmentTimer = window.setTimeout(() => {
       alignmentTimer = null;
       alignParallelColumns();
-      if (snapshot) {
-        restoreViewSnapshot("codex-panel-parallel", snapshot);
+      if (snapshots) {
+        isSyncing = true;
+        columns.forEach((column, index) => restoreColumnSnapshot(column, snapshots[index]));
+        releaseSyncGuard();
       }
     }, 80);
   }
   function syncFrom(source) {
     if (!source || !syncEnabled || isSyncing || columns.length < 2) return;
     const previousTop = scrollPositions.get(source) ?? source.scrollTop;
-    const delta = source.scrollTop - previousTop;
+    const delta = mappedScrollTop(source, source.scrollTop) - mappedScrollTop(source, previousTop);
     if (!delta) {
       captureScrollPositions();
       return;
     }
-    isSyncing = true;
     columns.forEach((column) => {
       if (column !== source) {
-        column.scrollTop = clampScrollTop(column, column.scrollTop + delta);
+        const nextTop = clampScrollTop(column, column.scrollTop + delta);
+        expectedScrolls.set(column, nextTop);
+        column.scrollTop = nextTop;
       }
     });
-    window.setTimeout(() => {
-      captureScrollPositions();
-      isSyncing = false;
-    }, 0);
+    captureScrollPositions();
   }
   function viewportTop() {
     return tabs ? tabs.getBoundingClientRect().bottom : 0;
@@ -557,9 +607,9 @@ document.addEventListener("DOMContentLoaded", function () {
   function snapshotFromContainer(container, scrollElement) {
     if (!container) return null;
     const top = scrollElement ? scrollElement.getBoundingClientRect().top + 46 : viewportTop();
-    let candidates = Array.from(container.querySelectorAll(alignmentAnchorSelector)).filter(
-      (element) => element.id && !String(element.id).startsWith("codex-")
-    );
+    let candidates = Array.from(collectAlignmentAnchors(scrollElement || {
+      querySelector: () => container.querySelector("article.ltx_document")
+    }).values()).map((anchor) => anchor.insertBefore);
     if (!candidates.length) {
       candidates = Array.from(container.querySelectorAll("[id]")).filter(
         (element) => !String(element.id).startsWith("codex-")
@@ -632,12 +682,16 @@ document.addEventListener("DOMContentLoaded", function () {
     restoreWindowSnapshot(snapshot);
   }
   function setSyncEnabled(enabled) {
+    if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
+    scrollFrame = null;
+    pendingSource = null;
     syncEnabled = enabled;
     if (!syncButton) return;
     syncButton.textContent = enabled ? "스크롤 동기화 끄기" : "스크롤 동기화 켜기";
     syncButton.classList.toggle("is_off", !enabled);
     syncButton.setAttribute("aria-pressed", enabled ? "true" : "false");
     captureScrollPositions();
+    rebuildScrollMap();
   }
   function activate(target, preservePosition = true) {
     const snapshot = preservePosition ? captureViewSnapshot() : null;
@@ -666,11 +720,35 @@ document.addEventListener("DOMContentLoaded", function () {
     button.addEventListener("click", () => activate(button.dataset.target));
   });
   columns.forEach((column) => {
+    ["wheel", "touchstart", "pointerdown", "keydown"].forEach((eventName) => {
+      column.addEventListener(eventName, () => expectedScrolls.delete(column), { passive: true });
+    });
     column.addEventListener("scroll", () => {
       if (isSyncing) return;
+      if (expectedScrolls.has(column)) {
+        const expected = expectedScrolls.get(column);
+        expectedScrolls.delete(column);
+        if (Math.abs(column.scrollTop - expected) < 1) return;
+      }
       lastScrolledColumn = column;
-      syncFrom(column);
+      if (!syncEnabled || !isParallelActive()) {
+        scrollPositions.set(column, column.scrollTop);
+        return;
+      }
+      pendingSource = column;
+      if (scrollFrame !== null) return;
+      scrollFrame = window.requestAnimationFrame(() => {
+        scrollFrame = null;
+        const source = pendingSource;
+        pendingSource = null;
+        syncFrom(source);
+      });
     }, { passive: true });
+  });
+  columns.forEach((column) => {
+    column.querySelectorAll("details").forEach((details) => {
+      details.addEventListener("toggle", () => scheduleParallelAlignment(true));
+    });
   });
   if (syncButton) {
     syncButton.addEventListener("click", () => setSyncEnabled(!syncEnabled));
