@@ -106,6 +106,16 @@ struct WorkspaceView: View {
     @State private var isFileImporterPresented = false
     @State private var readerScrollTarget: String?
     @State private var loadedReaderHeadings: [ReaderHeading] = []
+    @State private var readerMode = 0
+    @State private var readerOutlineVisible = true
+    @State private var readerCurrentAnchor: String?
+    @State private var readerJumpRequest = 0
+    @State private var readerFindVisible = false
+    @State private var readerFindQuery = ""
+    @State private var readerFindRequest = 0
+    @State private var readerFindBackwards = false
+    @State private var readerFindCount = 0
+    @FocusState private var readerFindFocused: Bool
     @State private var outputDocuments: [OutputDocument] = []
     @State private var documentSearchText = ""
     @State private var documentLoadError: String?
@@ -522,20 +532,34 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Button {
-                    stage = .importDocument
+                    destination = .documents
                 } label: {
-                    Image(systemName: "sidebar.left")
+                    Image(systemName: "chevron.left")
                         .frame(width: 18, height: 18)
                 }
                 .buttonStyle(WorkspaceIconButtonStyle())
 
-                Picker("보기", selection: .constant(0)) {
+                Button { readerOutlineVisible.toggle() } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("목차 접기 / 펼치기")
+                .buttonStyle(WorkspaceIconButtonStyle())
+
+                Picker("보기", selection: $readerMode) {
                     Text("번역본").tag(0)
                     Text("원문 비교").tag(1)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 168)
+
+                Button {
+                    readerFindVisible.toggle()
+                    readerFindFocused = readerFindVisible
+                } label: { Image(systemName: "magnifyingglass") }
+                .buttonStyle(WorkspaceIconButtonStyle())
+                .keyboardShortcut("f", modifiers: .command)
+                .help("본문 검색 (⌘F)")
 
                 Spacer()
 
@@ -556,17 +580,46 @@ struct WorkspaceView: View {
 
             Divider()
 
+            if readerFindVisible {
+                HStack {
+                    TextField("본문 검색", text: $readerFindQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($readerFindFocused)
+                        .onSubmit { readerFindBackwards = false; readerFindRequest += 1 }
+                        .onChange(of: readerFindQuery) { _ in readerFindBackwards = false; readerFindRequest += 1 }
+                    Text("\(readerFindCount)개").font(.caption).foregroundStyle(.secondary)
+                    Button { readerFindBackwards = true; readerFindRequest += 1 } label: { Image(systemName: "chevron.up") }
+                        .help("이전 검색 결과")
+                    Button { readerFindBackwards = false; readerFindRequest += 1 } label: { Image(systemName: "chevron.down") }
+                        .help("다음 검색 결과")
+                    Button { readerFindVisible = false } label: { Image(systemName: "xmark") }
+                        .help("검색 닫기")
+                }
+                .padding(10)
+            }
+
             if let url = readerURL {
                 HStack(spacing: 0) {
-                    ReaderOutline(headings: loadedReaderHeadings, selectedAnchor: $readerScrollTarget)
-                    Divider()
-                    PaperWebPreview(url: url, scrollTarget: readerScrollTarget)
+                    if readerOutlineVisible {
+                        ReaderOutline(headings: loadedReaderHeadings, currentAnchor: readerCurrentAnchor) { anchor in
+                            readerScrollTarget = anchor
+                            readerJumpRequest += 1
+                        }
+                        Divider()
+                    }
+                    PaperWebPreview(url: url, mode: readerMode, scrollTarget: readerScrollTarget,
+                                    jumpRequest: readerJumpRequest, findQuery: readerFindQuery,
+                                    findRequest: readerFindRequest, findBackwards: readerFindBackwards,
+                                    headings: $loadedReaderHeadings, currentAnchor: $readerCurrentAnchor,
+                                    findCount: $readerFindCount)
                         .accessibilityHidden(readerPreviewEnabled)
                 }
-                .onAppear {
-                    if loadedReaderHeadings.isEmpty {
-                        loadedReaderHeadings = ReaderHeadingParser.parse(url: url)
-                    }
+                .onAppear { readerMode = ReaderProgressStore.mode(for: url) }
+                .onChange(of: url) { newURL in
+                    loadedReaderHeadings = []
+                    readerScrollTarget = nil
+                    readerCurrentAnchor = nil
+                    readerMode = ReaderProgressStore.mode(for: newURL)
                 }
             } else {
                 EmptyDocumentView(
@@ -846,7 +899,9 @@ struct WorkspaceView: View {
                 .appendingPathComponent("outputs/mmdocrag.ko.paper.html")
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
-        return model.readerOutputURL()
+        guard let selected = model.readerOutputURL() else { return nil }
+        let bilingual = URL(fileURLWithPath: selected.path.replacingOccurrences(of: ".ko.paper.html", with: ".ko-en.paper.html"))
+        return FileManager.default.fileExists(atPath: bilingual.path) ? bilingual : selected
     }
 
 }
@@ -1106,140 +1161,6 @@ private struct EmptyDocumentView: View {
                 .foregroundStyle(WorkspacePalette.secondaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct ReaderHeading: Identifiable {
-    let id: String
-    let title: String
-    let level: Int
-}
-
-private enum ReaderHeadingParser {
-    static func parse(url: URL) -> [ReaderHeading] {
-        guard let html = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        var headings: [ReaderHeading] = []
-        var sectionID: String?
-        var headingLevel: Int?
-        var headingHTML = ""
-
-        for rawLine in html.split(whereSeparator: \.isNewline) {
-            let line = String(rawLine)
-            if line.contains("<section"), let id = attribute(named: "id", in: line) {
-                sectionID = id
-            }
-
-            if headingLevel == nil {
-                if line.contains("<h2") {
-                    headingLevel = 2
-                    headingHTML = line
-                } else if line.contains("<h3") {
-                    headingLevel = 3
-                    headingHTML = line
-                }
-            } else {
-                headingHTML += " " + line
-            }
-
-            guard let level = headingLevel, headingHTML.contains("</h\(level)>") else { continue }
-            let title = headingHTML
-                .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
-                .replacingOccurrences(of: "&amp;", with: "&")
-                .replacingOccurrences(of: "&nbsp;", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if let sectionID, !title.isEmpty {
-                headings.append(ReaderHeading(id: sectionID, title: title, level: level))
-            }
-            headingLevel = nil
-            headingHTML = ""
-            sectionID = nil
-            if headings.count == 18 { break }
-        }
-        return headings
-    }
-
-    private static func attribute(named name: String, in text: String) -> String? {
-        let marker = "\(name)=\""
-        guard let start = text.range(of: marker) else { return nil }
-        let suffix = text[start.upperBound...]
-        guard let end = suffix.firstIndex(of: "\"") else { return nil }
-        return String(suffix[..<end])
-    }
-}
-
-private struct ReaderOutline: View {
-    let headings: [ReaderHeading]
-    @Binding var selectedAnchor: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("목차")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(headings) { heading in
-                        Button {
-                            selectedAnchor = heading.id
-                        } label: {
-                            Text(heading.title)
-                                .font(.system(size: 11, weight: selectedAnchor == heading.id ? .semibold : .regular))
-                                .foregroundStyle(selectedAnchor == heading.id ? WorkspacePalette.blue : WorkspacePalette.secondaryText)
-                                .lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.leading, heading.level == 3 ? 12 : 0)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(selectedAnchor == heading.id ? WorkspacePalette.blue.opacity(0.10) : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 6)
-            }
-        }
-        .frame(width: 170)
-        .background(WorkspacePalette.panel.opacity(0.72))
-    }
-}
-
-private struct PaperWebPreview: NSViewRepresentable {
-    let url: URL
-    let scrollTarget: String?
-
-    final class Coordinator {
-        var lastScrollTarget: String?
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView()
-        view.setValue(false, forKey: "drawsBackground")
-        return view
-    }
-
-    func updateNSView(_ view: WKWebView, context: Context) {
-        if view.url != url {
-            // Generated readers live in outputs/ while PDF page and layout crops
-            // live in the sibling inputs/assets/ tree. WKWebView blocks those
-            // images unless the repository root is included in its read scope.
-            let repositoryRoot = url.deletingLastPathComponent().deletingLastPathComponent()
-            view.loadFileURL(url, allowingReadAccessTo: repositoryRoot)
-        }
-        guard let scrollTarget, context.coordinator.lastScrollTarget != scrollTarget else { return }
-        context.coordinator.lastScrollTarget = scrollTarget
-        let escaped = scrollTarget.replacingOccurrences(of: "'", with: "\\'")
-        view.evaluateJavaScript("document.getElementById('\(escaped)')?.scrollIntoView({behavior:'smooth', block:'start'});")
     }
 }
 
