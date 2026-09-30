@@ -12,7 +12,8 @@ from typing import Any, Iterable
 
 DEFAULT_LAYOUT_MODEL = "sahilchachra/unlimited-ocr-mxfp8-mlx"
 DEFAULT_LAYOUT_INSTRUCTION = "<|grounding|>Convert the document to markdown."
-MODEL_INPUT_SIZE = 1024
+# Grounding boxes use 0–1000 coordinates, independent of the vision input size.
+LAYOUT_COORDINATE_SIZE = 1000
 MODEL_INPUT_MAX_EDGE = 1600
 
 
@@ -44,6 +45,9 @@ VISUAL_KIND_PARTS = {
     "photo",
     "plot",
     "table",
+    "equation",
+    "formula",
+    "math",
 }
 HEADING_KIND_PARTS = {"header", "heading", "section", "title"}
 CAPTION_KIND_PARTS = {"caption", "footnote"}
@@ -112,8 +116,8 @@ def scaled_bbox(
     bbox: tuple[float, float, float, float],
     image_width: int,
     image_height: int,
-    coordinate_width: float = MODEL_INPUT_SIZE,
-    coordinate_height: float = MODEL_INPUT_SIZE,
+    coordinate_width: float = LAYOUT_COORDINATE_SIZE,
+    coordinate_height: float = LAYOUT_COORDINATE_SIZE,
     padding: int = 18,
 ) -> tuple[int, int, int, int]:
     x1, y1, x2, y2 = bbox
@@ -130,10 +134,10 @@ def pdf_bbox_to_model(
     bbox: tuple[float, float, float, float], page_width: float, page_height: float
 ) -> tuple[float, float, float, float]:
     return (
-        bbox[0] * MODEL_INPUT_SIZE / page_width,
-        bbox[1] * MODEL_INPUT_SIZE / page_height,
-        bbox[2] * MODEL_INPUT_SIZE / page_width,
-        bbox[3] * MODEL_INPUT_SIZE / page_height,
+        bbox[0] * LAYOUT_COORDINATE_SIZE / page_width,
+        bbox[1] * LAYOUT_COORDINATE_SIZE / page_height,
+        bbox[2] * LAYOUT_COORDINATE_SIZE / page_width,
+        bbox[3] * LAYOUT_COORDINATE_SIZE / page_height,
     )
 
 
@@ -187,13 +191,13 @@ def combine_native_text_with_grounded_visuals(
 
 def order_layout_blocks(blocks: list[LayoutBlock]) -> list[LayoutBlock]:
     """Reflow common two-column paper pages into article reading order."""
-    midpoint = MODEL_INPUT_SIZE / 2
+    midpoint = LAYOUT_COORDINATE_SIZE / 2
     full_width: list[LayoutBlock] = []
     column: list[LayoutBlock] = []
     for block in blocks:
         width = block.bbox[2] - block.bbox[0]
         crosses_midpoint = block.bbox[0] < midpoint < block.bbox[2]
-        if crosses_midpoint and width >= MODEL_INPUT_SIZE * 0.42:
+        if crosses_midpoint and width >= LAYOUT_COORDINATE_SIZE * 0.42:
             full_width.append(block)
         else:
             column.append(block)
@@ -324,7 +328,10 @@ def render_layout_page(
         for index, block in enumerate(blocks, start=1):
             block_id = f"p{page_num}-layout-{index}"
             if is_visual_block(block):
-                crop_box = scaled_bbox(block.bbox, source_image.width, source_image.height)
+                # Equations are tightly spaced between paragraphs. Keep the full
+                # formula and number without pulling adjacent prose into the crop.
+                padding = 5 if kind_contains(block.kind, {"equation", "formula", "math"}) else 18
+                crop_box = scaled_bbox(block.bbox, source_image.width, source_image.height, padding=padding)
                 if crop_box[2] - crop_box[0] < 8 or crop_box[3] - crop_box[1] < 8:
                     continue
                 crop_dir.mkdir(parents=True, exist_ok=True)

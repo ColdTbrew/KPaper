@@ -17,7 +17,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, Tag, NavigableString
 
 
 TRANSLATE_SELECTORS = [
@@ -88,6 +88,9 @@ body {
   font-weight: 600 !important;
   margin: 0 auto 32px !important;
   max-width: 760px;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  white-space: normal;
 }
 .ltx_authors {
   text-align: center;
@@ -95,7 +98,7 @@ body {
   line-height: 1.45;
   margin-bottom: 58px;
 }
-.ltx_title_abstract, .ltx_title_section, .ltx_title_subsection {
+.ltx_title_abstract, .ltx_title_section, .ltx_title_subsection, .ltx_title_subsubsection {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
   font-weight: 700 !important;
   letter-spacing: 0;
@@ -103,6 +106,8 @@ body {
 .ltx_title_abstract { font-size: 24px !important; margin: 0 0 18px !important; }
 .ltx_title_section { font-size: 27px !important; margin: 54px 0 18px !important; }
 .ltx_title_subsection { font-size: 22px !important; margin: 34px 0 12px !important; }
+.ltx_title_subsubsection { font-size: 20px !important; margin: 28px 0 12px !important; }
+.codex_pdf_runin_title { font-weight: 700; }
 .ltx_p {
   margin: 0 0 1.05em !important;
   text-align: justify;
@@ -251,6 +256,21 @@ thead td, thead th, .ltx_tr:first-child > .ltx_td, .ltx_tr:first-child > .ltx_th
   display: none !important;
 }
 a { color: #174ea6; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.codex_references {
+  margin: 36px 0 24px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+}
+.codex_references > summary {
+  cursor: pointer;
+  padding: 14px 18px;
+  font-weight: 600;
+}
+.codex_references > summary:focus-visible {
+  outline: 2px solid #174ea6;
+  outline-offset: 3px;
+}
+.codex_references_content { padding: 8px 18px 18px; }
 @media (max-width: 760px) {
   body { font-size: 17px; }
   .ltx_document { padding: 32px 18px 72px !important; }
@@ -724,12 +744,97 @@ def should_translate_tag(tag: Tag) -> bool:
     return True
 
 
+REFERENCE_SELECTOR = '.ltx_bibliography, .ltx_biblist, [role="doc-bibliography"]'
+REFERENCE_HEADING = re.compile(r"^(?:\d+[.\s]+)?(?:references|bibliography|참고\s*문헌)\s*[:.]?$", re.IGNORECASE)
+
+
+def reference_blocks(soup: BeautifulSoup) -> list[Tag]:
+    """Find semantic bibliographies and flattened PDF references across pages."""
+    semantic_ids = {
+        id(tag)
+        for region in soup.select(REFERENCE_SELECTOR)
+        for tag in [region, *region.find_all(True)]
+    }
+    result: list[Tag] = []
+    in_references = False
+    for tag in soup.select(", ".join(TRANSLATE_SELECTORS)):
+        text = tag.get_text(" ", strip=True)
+        if REFERENCE_HEADING.fullmatch(text):
+            in_references = True
+        elif in_references and (
+            tag.name in {"h1", "h2", "h3", "h4", "h5", "h6"}
+            or re.match(r"^(?:appendix|appendices|supplementary material|부록)(?:\s|[.:]|$)", text, re.IGNORECASE)
+        ):
+            in_references = False
+        if in_references or id(tag) in semantic_ids:
+            result.append(tag)
+    return result
+
+
+def restore_source_references(translated: BeautifulSoup, source: BeautifulSoup) -> int:
+    restored = 0
+    seen: set[str] = set()
+    for tag in [*source.select(REFERENCE_SELECTOR), *reference_blocks(source)]:
+        # PDF paragraphs carry their stable ID on the enclosing div; ar5iv
+        # bibliography items commonly carry it on the enclosing list item.
+        container = tag if tag.get("id") else tag.find_parent(["div", "li"], id=True)
+        if container is None:
+            continue
+        element_id = container.get("id")
+        if element_id in seen:
+            continue
+        seen.add(element_id)
+        target = translated.find(id=element_id)
+        if target:
+            replacement = BeautifulSoup(str(container), "lxml").find(container.name)
+            target.replace_with(replacement)
+            restored += 1
+    return restored
+
+
+def collapse_references(soup: BeautifulSoup) -> None:
+    """Keep one accessible, initially closed bibliography, including PDF page continuations."""
+    if soup.select_one("details.codex_references"):
+        return
+    candidates = list(soup.select(REFERENCE_SELECTOR))
+    for tag in reference_blocks(soup):
+        container = tag if tag.get("id") else tag.find_parent(["div", "li"], id=True)
+        candidates.append(container if container is not None else tag)
+    candidate_ids = {id(tag) for tag in candidates}
+    roots: list[Tag] = []
+    seen: set[int] = set()
+    for tag in candidates:
+        if id(tag) in seen or any(id(parent) in candidate_ids for parent in tag.parents):
+            continue
+        seen.add(id(tag))
+        roots.append(tag)
+    if not roots:
+        return
+    details = soup.new_tag("details")
+    details["class"] = "codex_references"
+    summary = soup.new_tag("summary")
+    summary.string = "참고문헌 (References)"
+    details.append(summary)
+    content = soup.new_tag("div")
+    content["class"] = "codex_references_content"
+    details.append(content)
+    roots[0].insert_before(details)
+    for tag in roots:
+        content.append(tag.extract())
+    # PDF references can fill several page sections. Remove only sections left
+    # completely empty by moving their content into the accordion.
+    for section in soup.select("section.codex_pdf_page"):
+        if not section.find(True) and not section.get_text(strip=True):
+            section.decompose()
+
+
 def collect_blocks(soup: BeautifulSoup) -> list[Tag]:
     blocks: list[Tag] = []
     seen: set[int] = set()
+    excluded = {id(tag) for tag in reference_blocks(soup)}
     for selector in TRANSLATE_SELECTORS:
         for tag in soup.select(selector):
-            if id(tag) in seen or not should_translate_tag(tag):
+            if id(tag) in seen or id(tag) in excluded or not should_translate_tag(tag):
                 continue
             seen.add(id(tag))
             blocks.append(tag)
@@ -910,7 +1015,54 @@ def log_factory(path: Path | None):
     return log
 
 
+def format_pdf_titles(soup: BeautifulSoup, source: BeautifulSoup | None = None) -> None:
+    """Recover headings flattened by native PDF text extraction, using source labels."""
+    excluded = {id(tag) for tag in reference_blocks(soup)}
+    for tag in soup.select(".codex_pdf_document .codex_pdf_layout_text > p.ltx_p, .codex_pdf_document h2.ltx_title_section"):
+        if id(tag) in excluded:
+            continue
+        original = tag
+        if source is not None:
+            stable_id = tag.get("id") or (tag.parent.get("id") if tag.parent else None)
+            match = source.find(id=stable_id) if stable_id else None
+            if match:
+                original = match.select_one("p.ltx_p, h2, h3, h4") or match
+        source_text = original.get_text(" ", strip=True)
+        numbered = re.match(r"^(\d+(?:\.\d+)*)(?:\.)?\s+\S", source_text)
+        if numbered and len(source_text) <= 160 and not source_text.endswith((".", "!", "?")):
+            level = min(4, 1 + len(numbered.group(1).split(".")))
+            tag.name = f"h{level}"
+            tag["class"] = ["ltx_title", {2: "ltx_title_section", 3: "ltx_title_subsection", 4: "ltx_title_subsubsection"}[level]]
+            if not tag.get("id") and tag.parent.get("id"):
+                tag["id"] = tag.parent["id"] + "-heading"
+            continue
+        # Short Title Case labels ending in a period are PDF run-in headings.
+        # Inspect English source so Korean translations need no guessed label list.
+        prefix = re.split(r"\.(?:\s+|(?=[A-Z]))", source_text, maxsplit=1)
+        if len(prefix) != 2 or len(prefix[0]) > 80:
+            continue
+        words = prefix[0].split()
+        if not 2 <= len(words) <= 8 or not all(
+            re.fullmatch(r"[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*", word)
+            or word in {"and", "of", "in", "for", "to", "with", "on"}
+            for word in words
+        ):
+            continue
+        if not tag.contents or not isinstance(tag.contents[0], NavigableString):
+            continue
+        first = tag.contents[0]
+        translated_prefix = re.match(r"^(.{1,90}?\.)\s+", str(first))
+        if translated_prefix:
+            strong = soup.new_tag("strong")
+            strong["class"] = "codex_pdf_runin_title"
+            strong.string = translated_prefix.group(1)
+            first.replace_with(strong)
+            strong.insert_after(NavigableString(str(first)[len(translated_prefix.group(1)):]))
+
+
 def inject_style(soup: BeautifulSoup) -> None:
+    format_pdf_titles(soup)
+    collapse_references(soup)
     existing = soup.find(id="codex-paper-viewer-style")
     if existing:
         existing.decompose()
@@ -1201,6 +1353,7 @@ def main(argv: list[str]) -> None:
         if replacement:
             tag.replace_with(replacement)
 
+    format_pdf_titles(soup, BeautifulSoup(input_path.read_text(encoding="utf-8"), "lxml"))
     inject_style(soup)
     rebase_local_asset_links(soup, input_path.parent, output_path.parent)
     fix_file_viewer_links(soup)

@@ -446,6 +446,7 @@ def pdf_to_source_html(
                     1
                     for block in layout_blocks
                     if pdf_layout.is_visual_block(block) and "table" not in block.kind
+                    and not pdf_layout.kind_contains(block.kind, {"equation", "formula", "math"})
                 )
                 formula_blocks += sum(
                     1

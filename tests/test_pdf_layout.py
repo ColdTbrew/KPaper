@@ -94,6 +94,29 @@ class LayoutFallbackTests(unittest.TestCase):
 
 
 class LayoutRendererTests(unittest.TestCase):
+    def test_grounded_equation_replaces_native_latex_fragments(self) -> None:
+        equation = pdf_layout.LayoutBlock("equation", (192, 830, 483, 857), r"\[A_i=\frac{r_i}{s}\]")
+        fragments = [
+            pdf_layout.LayoutBlock("text", (195, 833, 300, 845), r"A_i=\frac{"),
+            pdf_layout.LayoutBlock("text", (250, 845, 480, 857), "r_i}{s}"),
+            pdf_layout.LayoutBlock("text", (90, 860, 483, 902), "Following paragraph"),
+        ]
+        combined = pdf_layout.combine_native_text_with_grounded_visuals(fragments, [equation])
+        self.assertEqual(combined, [equation, fragments[-1]])
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            image = root / "page.png"
+            Image.new("RGB", (1000, 2000), "white").save(image)
+            rendered, count = pdf_layout.render_layout_page(combined, image, root, root, "paper", 1)
+            self.assertEqual(count, 1)
+            self.assertIn("codex_pdf_layout_equation", rendered)
+            self.assertNotIn(r"\frac", rendered)
+            self.assertIn("Following paragraph", rendered)
+
+    def test_grounding_coordinates_are_independent_of_vision_resolution(self) -> None:
+        self.assertEqual(pdf_layout.scaled_bbox((0, 0, 1000, 1000), 1224, 1584, padding=0), (0, 0, 1224, 1584))
+        self.assertEqual(pdf_layout.pdf_bbox_to_model((0, 0, 612, 792), 612, 792), (0, 0, 1000, 1000))
+
     def test_keeps_one_grounded_crop_for_a_composite_vector_figure(self) -> None:
         native_blocks = [
             pdf_layout.LayoutBlock("text", (100, 80, 900, 130), "Before"),
