@@ -15,6 +15,11 @@ struct KPaperMacApp: App {
                 .frame(minWidth: 820, minHeight: 640)
         }
         .windowStyle(.hiddenTitleBar)
+        .commands { ReleaseNotesCommands() }
+
+        Window("릴리스 반영사항", id: "release-notes") {
+            ReleaseNotesView()
+        }
     }
 }
 
