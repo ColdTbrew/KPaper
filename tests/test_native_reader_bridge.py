@@ -20,7 +20,7 @@ const root={closest:()=>null,innerText:'Alpha alpha beta',querySelectorAll:q=>q=
 global.CSS={escape:x=>x};
 global.getComputedStyle=()=>({overflowY:'auto'});
 global.window={webkit:{messageHandlers:{reader:{postMessage:x=>reports.push(x)}}},addEventListener:()=>{}};
-global.document={head:{append:()=>{}},createElement:()=>({}),scrollingElement:{scrollTop:0},addEventListener:()=>{},querySelectorAll:()=>[],querySelector:q=>q.includes('codex_tab_button')?{click:()=>clicks.push(q)}:root};
+global.document={body:{classList:{toggle:()=>{}}},head:{append:()=>{}},createElement:()=>({}),scrollingElement:{scrollTop:0},addEventListener:()=>{},querySelectorAll:()=>[],querySelector:q=>q.includes('codex_tab_button')?{click:()=>clicks.push(q)}:root};
 global.setTimeout=f=>{jobs.push(f);return jobs.length}; global.clearTimeout=()=>{};
 function flush(){while(jobs.length)jobs.shift()();}
 BRIDGE
@@ -31,6 +31,14 @@ assert.strictEqual(reports.at(-1).headings[0].level,4);
 assert.strictEqual(reports.at(-1).current,'section-one');
 assert.strictEqual(window.kpaperReader.count('ALPHA'),2);
 assert.strictEqual(window.kpaperReader.count(''),0);
+const columns = [{scrollTop:10,getBoundingClientRect:()=>({top:20})},{scrollTop:25,getBoundingClientRect:()=>({top:20})}];
+document.querySelectorAll = () => columns.map(col => ({querySelector:()=>({closest:()=>col,getBoundingClientRect:()=>({top:200})})}));
+window.kpaperReader.jump('section-one'); flush();
+assert.strictEqual(columns[0].scrollTop,144);
+assert.strictEqual(columns[1].scrollTop,159);
+assert.strictEqual(document.scrollingElement.scrollTop,0);
+document.querySelectorAll = () => [];
+
 reports.length=0;
 window.kpaperReader.restore('missing-anchor',30); flush();
 assert(reports.every(x=>!('anchor' in x)), 'Failed restore must not overwrite saved position');

@@ -148,7 +148,15 @@ struct PaperWebPreview: NSViewRepresentable {
     (() => {
       const post = data => window.webkit.messageHandlers.reader.postMessage(data);
       const style = document.createElement('style');
-      style.textContent = '.codex_tab_button {display:none!important} .codex_tabs {min-height:0!important;padding:4px!important} .codex_tabs:has(.codex_sync_button[hidden]){display:none!important}';
+      style.textContent = `
+        .codex_tab_button {display:none!important}
+        .codex_tabs {min-height:0!important;padding:4px!important}
+        .codex_tabs:has(.codex_sync_button[hidden]){display:none!important}
+        body.has_bilingual_view .codex_parallel {grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;height:calc(100vh - 44px)!important;overflow:hidden!important}
+        body.has_bilingual_view .codex_parallel_column {height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;border-top:0!important;overscroll-behavior:contain;overflow-anchor:none}
+        body.has_bilingual_view .codex_parallel .ltx_document {padding-left:18px!important;padding-right:18px!important}
+        body.kpaper-native-parallel {overflow:hidden!important}
+      `;
       document.head.append(style);
       let mode = 0, timer, restoring = false;
       const root = () => document.querySelector(mode === 1 ? '#codex-panel-parallel .codex_parallel_column:last-child article' : '#codex-panel-ko article') || document.querySelector('article');
@@ -157,6 +165,9 @@ struct PaperWebPreview: NSViewRepresentable {
       const container = () => { const r=root(); const col=r?.closest('.codex_parallel_column'); return col && getComputedStyle(col).overflowY === 'auto' ? col : document.scrollingElement; };
       const top = e => e.getBoundingClientRect().top - (container() === document.scrollingElement ? 0 : container().getBoundingClientRect().top);
       function report() {
+        if(mode === 1) document.querySelectorAll('#codex-panel-parallel .codex_parallel_column article').forEach(r => {
+          [...(r.querySelectorAll?.('h2,h3,h4,h5,h6') || [])].filter(e => !e.closest('details')).forEach(ensureID);
+        });
         const list = headings();
         const items = list.map((e,i) => ({id:ensureID(e,i), title:e.textContent.trim(), level:Number(e.tagName.slice(1))}));
         const current = [...list].reverse().find(e => top(e) <= 90) || list[0];
@@ -165,8 +176,19 @@ struct PaperWebPreview: NSViewRepresentable {
         post({headings:items, current:current?.id || '', ...(!restoring && anchor ? {anchor:anchor.id, offset:top(anchor)} : {})});
       }
       window.kpaperReader = {
-        mode(value) { mode=value; document.querySelector('.codex_tab_button[data-target="'+(value===1?'codex-panel-parallel':'codex-panel-ko')+'"]')?.click(); setTimeout(report,200); },
-        jump(id) { root()?.querySelector('#'+CSS.escape(id))?.scrollIntoView({block:'start'}); setTimeout(report,100); },
+        mode(value) { mode=value; document.body.classList.toggle('kpaper-native-parallel', value===1); document.querySelector('.codex_tab_button[data-target="'+(value===1?'codex-panel-parallel':'codex-panel-ko')+'"]')?.click(); if(value===1) document.scrollingElement.scrollTop=0; setTimeout(report,200); },
+        jump(id) {
+          const roots = mode === 1 ? [...document.querySelectorAll('#codex-panel-parallel .codex_parallel_column article')] : [root()];
+          for (const r of roots) {
+            const e = r?.querySelector('#'+CSS.escape(id));
+            if (!e) continue;
+            const col = e.closest('.codex_parallel_column');
+            if (mode === 1 && col) col.scrollTop += e.getBoundingClientRect().top-col.getBoundingClientRect().top-46;
+            else e.scrollIntoView({block:'start'});
+          }
+          if(mode===1) document.scrollingElement.scrollTop=0;
+          setTimeout(report,100);
+        },
         restore(id, offset) {
           if (!id) return;
           restoring = true;
