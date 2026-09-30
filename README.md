@@ -173,6 +173,8 @@ The bundle is written to:
 dist/KPaper.app
 ```
 
+Release changes are documented in [RELEASE_NOTES.md](RELEASE_NOTES.md). The build script uses the native Swift build system, validates the bundle, and applies an ad hoc signature for local use. To choose an installed SDK explicitly, run `KPAPER_SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)" ./scripts/build_macos_app.sh`. When the default SDK references missing Swift compiler macros, the script retries another installed SDK; an explicit override is never replaced.
+
 In the app you can:
 
 - Paste an arXiv/ar5iv link or drag and drop a local PDF.

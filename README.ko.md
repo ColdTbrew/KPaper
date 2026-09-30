@@ -173,6 +173,8 @@ uv sync
 dist/KPaper.app
 ```
 
+릴리스 반영 사항은 [RELEASE_NOTES.md](RELEASE_NOTES.md)에 정리합니다. 빌드 스크립트는 Swift 네이티브 빌드 시스템을 사용하고, 번들을 검사한 뒤 로컬 실행용 임시 서명을 적용합니다. 설치된 SDK를 직접 선택하려면 `KPAPER_SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)" ./scripts/build_macos_app.sh`를 실행합니다. 기본 SDK의 Swift 컴파일러 매크로가 누락된 경우 다른 설치된 SDK로 재시도하며, 명시한 SDK는 자동으로 바꾸지 않습니다.
+
 앱에서 할 수 있는 일:
 
 - arXiv/ar5iv 링크를 붙여넣거나 로컬 PDF를 드래그 앤 드롭합니다.
