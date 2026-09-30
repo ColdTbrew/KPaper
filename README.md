@@ -77,8 +77,10 @@ The same provider is available from the CLI:
 ./kpaper translate \
   --paper-id mmdocrag \
   --provider codex \
-  --model gpt-5.4-mini
+  --model gpt-6-luna
 ```
+
+Codex translation defaults to `gpt-6-luna` with `low` reasoning effort; `--model` overrides the model. API translation keeps its `gpt-5.4-mini` default. Codex receives the explicit configuration `model_reasoning_effort="low"` for every batch.
 
 ### Option B: OpenAI-Compatible API
 

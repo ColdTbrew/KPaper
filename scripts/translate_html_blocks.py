@@ -1034,6 +1034,10 @@ def call_api(
     raise RuntimeError(f"request failed: {last}") from last
 
 
+def translation_model(provider: str, requested: str | None = None) -> str:
+    return requested or ("gpt-6-luna" if provider == "codex" else "gpt-5.4-mini")
+
+
 def call_codex(
     model: str,
     batch: list[tuple[str, str]],
@@ -1070,6 +1074,8 @@ def call_codex(
             "never",
             "--model",
             model,
+            "-c",
+            'model_reasoning_effort="low"',
             "--output-schema",
             str(schema_path),
             "--output-last-message",
@@ -1365,7 +1371,7 @@ def main(argv: list[str]) -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--cache", required=True)
     parser.add_argument("--provider", choices=("api", "codex"), default="api")
-    parser.add_argument("--model", default="gpt-5.4-mini")
+    parser.add_argument("--model", default="", help="Codex default: gpt-6-luna; API default: gpt-5.4-mini")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--max-chars", type=int, default=5000)
     parser.add_argument("--timeout", type=int, default=180)
@@ -1375,6 +1381,7 @@ def main(argv: list[str]) -> None:
     parser.add_argument("--bilingual-output", default="", help="Optional HTML output with Korean and English tabs")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    args.model = translation_model(args.provider, args.model)
 
     load_env_file(Path(args.env_file))
     log = log_factory(Path(args.progress_log) if args.progress_log else None)

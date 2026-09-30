@@ -77,8 +77,10 @@ CLI에서도 같은 provider를 사용할 수 있습니다.
 ./kpaper translate \
   --paper-id mmdocrag \
   --provider codex \
-  --model gpt-5.4-mini
+  --model gpt-6-luna
 ```
+
+Codex 번역은 기본적으로 `gpt-6-luna`와 `low` 추론 강도를 사용하며 `--model`로 모델을 지정할 수 있습니다. API 번역의 기본 모델은 기존 `gpt-5.4-mini`입니다. 각 Codex 배치에 `model_reasoning_effort="low"` 설정을 명시적으로 전달합니다.
 
 ### 방법 B: OpenAI 호환 API
 

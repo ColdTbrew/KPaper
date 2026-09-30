@@ -704,7 +704,7 @@ def command_translate(args: argparse.Namespace) -> None:
         "--provider",
         args.provider,
         "--model",
-        args.model,
+        translate_html_blocks.translation_model(args.provider, args.model),
         "--env-file",
         args.env_file,
         "--max-chars",
@@ -918,7 +918,7 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--cache", default="")
     translate.add_argument("--progress-log", default="")
     translate.add_argument("--provider", choices=("api", "codex"), default="api")
-    translate.add_argument("--model", default=DEFAULT_MODEL)
+    translate.add_argument("--model", default="", help="Codex default: gpt-6-luna; API default: gpt-5.4-mini")
     translate.add_argument("--env-file", default=".env")
     translate.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
     translate.add_argument("--timeout", type=int, default=180)
