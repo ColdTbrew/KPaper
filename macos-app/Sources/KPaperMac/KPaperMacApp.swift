@@ -831,6 +831,7 @@ struct WorkspaceView: View {
                                 Text(provider.displayName).tag(provider)
                             }
                         }
+                        .pickerStyle(.segmented)
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
