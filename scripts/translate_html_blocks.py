@@ -410,6 +410,8 @@ document.addEventListener("DOMContentLoaded", function () {
   let scrollMap = [];
   const expectedScrolls = new WeakMap();
   const scrollPositions = new Map();
+  const stableViewSnapshots = new Map();
+  let layoutAlignmentPending = false;
   const alignmentAnchorSelector = [
     ".ltx_para[id]",
     "figure[id]",
@@ -427,6 +429,9 @@ document.addEventListener("DOMContentLoaded", function () {
   function captureScrollPositions() {
     columns.forEach((column) => {
       scrollPositions.set(column, column.scrollTop);
+      if (!layoutAlignmentPending && isParallelActive()) {
+        stableViewSnapshots.set(column, snapshotFromContainer(column, column));
+      }
     });
   }
   function clampScrollTop(element, value) {
@@ -482,6 +487,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }, 120);
   }
   function performNavigation(operation) {
+    if (alignmentTimer) window.clearTimeout(alignmentTimer);
+    alignmentTimer = null;
+    layoutAlignmentPending = false;
     ++syncGuardVersion;
     isSyncing = true;
     if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
@@ -590,19 +598,26 @@ document.addEventListener("DOMContentLoaded", function () {
     releaseSyncGuard();
   }
   function scheduleParallelAlignment(preservePosition = true) {
-    if (alignmentTimer) {
-      window.clearTimeout(alignmentTimer);
-    }
-    const snapshots = preservePosition && isParallelActive()
-      ? columns.map((column) => snapshotFromContainer(column, column)) : null;
+    if (!isParallelActive()) return;
+    if (alignmentTimer) window.clearTimeout(alignmentTimer);
+    // resize fires after reflow. Re-measuring here would save the newly shifted
+    // content rather than the paragraph the reader was looking at beforehand.
+    const snapshots = preservePosition
+      ? columns.map((column) => stableViewSnapshots.get(column) || snapshotFromContainer(column, column)) : null;
+    layoutAlignmentPending = true;
+    ++syncGuardVersion;
+    isSyncing = true;
+    if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
+    scrollFrame = null;
+    pendingSource = null;
+    columns.forEach((column) => expectedScrolls.delete(column));
     alignmentTimer = window.setTimeout(() => {
       alignmentTimer = null;
       alignParallelColumns();
-      if (snapshots) {
-        isSyncing = true;
-        columns.forEach((column, index) => restoreColumnSnapshot(column, snapshots[index]));
-        releaseSyncGuard();
-      }
+      if (snapshots) columns.forEach((column, index) => restoreColumnSnapshot(column, snapshots[index]));
+      layoutAlignmentPending = false;
+      captureScrollPositions();
+      releaseSyncGuard();
     }, 80);
   }
   function syncFrom(source) {
@@ -753,7 +768,7 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       lastScrolledColumn = column;
       if (!syncEnabled || !isParallelActive()) {
-        scrollPositions.set(column, column.scrollTop);
+        captureScrollPositions();
         return;
       }
       pendingSource = column;

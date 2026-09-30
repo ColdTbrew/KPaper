@@ -14,7 +14,7 @@ class ScrollSyncTests(unittest.TestCase):
     def test_real_viewer_script_maps_scroll_without_jumps_or_feedback(self):
         script = BILINGUAL_SCRIPT.split('>', 1)[1].rsplit('</script>', 1)[0]
         script = script.replace('  activate("codex-panel-ko", false);', '''
-        globalThis.syncTest = {syncFrom, setSyncEnabled, mappedScrollTop,
+        globalThis.syncTest = {syncFrom, setSyncEnabled, mappedScrollTop, captureScrollPositions, scheduleParallelAlignment,
           setMap: (value) => {scrollMap = value;}};
         ''')
         harness = r'''
@@ -90,6 +90,41 @@ context.window.kpaperViewer.performNavigation(() => {
 assert.equal(columns[0].scrollTop,200); assert.equal(columns[1].scrollTop,500);
 columns[0].scrollTop=250; api.syncFrom(columns[0]);
 assert.equal(columns[1].scrollTop,600);
+// Keep a semantic snapshot from BEFORE resize reflows text. Cancel the queued
+// user-scroll frame immediately, and preserve independently positioned panes.
+const timers = new Map(); let timerId=0;
+context.window.setTimeout=fn=>{timers.set(++timerId,fn);return timerId;};
+context.window.clearTimeout=id=>timers.delete(id);
+columns.forEach(col => {
+  col.contentY=800;
+  const anchor={id:'semantic', children:[], matches:()=>false, closest:()=>null,
+    getClientRects:()=>[{}], getBoundingClientRect:()=>({top:col.contentY-col.scrollTop,bottom:col.contentY-col.scrollTop+30,height:30})};
+  const article={querySelectorAll:()=>[anchor]};
+  col.querySelector=q=>q.startsWith('#')?anchor:article;
+});
+columns[0].scrollTop=200; columns[1].scrollTop=500;
+api.captureScrollPositions();
+columns[0].scrollTop=225; columns[0].fire('scroll');
+assert.equal(frames.size,1);
+columns.forEach(col=>{col.contentY=1100;}); // layout has already changed
+api.scheduleParallelAlignment(true);
+assert.equal(frames.size,0);
+columns[1].fire('scroll'); assert.equal(frames.size,0);
+while(timers.size){const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn());}
+assert.equal(columns[0].scrollTop,500);
+assert.equal(columns[1].scrollTop,800);
+// Disabled sync still caches each independent reading position for resize.
+api.setSyncEnabled(false);
+columns[0].scrollTop=600; columns[0].fire('scroll');
+columns[1].scrollTop=900; columns[1].fire('scroll');
+columns.forEach(col=>{col.contentY=1200;});
+api.scheduleParallelAlignment(true);
+while(timers.size){const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn());}
+assert.equal(columns[0].scrollTop,700);
+assert.equal(columns[1].scrollTop,1000);
+api.setSyncEnabled(true);
+assert.equal(columns[0].scrollTop,700); assert.equal(columns[1].scrollTop,1000);
+
 console.log('viewer synchronization behavior passed');
 '''
         result = subprocess.run([shutil.which('node'), '-e', harness], input=script, text=True, capture_output=True)
