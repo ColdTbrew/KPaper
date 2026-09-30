@@ -538,6 +538,8 @@ struct WorkspaceView: View {
                         .frame(width: 18, height: 18)
                 }
                 .buttonStyle(WorkspaceIconButtonStyle())
+                .help("문서 목록으로 돌아가기")
+                .accessibilityLabel("문서 목록으로 돌아가기")
 
                 Button { readerOutlineVisible.toggle() } label: {
                     Image(systemName: "sidebar.left")
@@ -568,10 +570,8 @@ struct WorkspaceView: View {
                     .foregroundStyle(WorkspacePalette.secondaryText)
                     .lineLimit(1)
 
-                Button("HTML") { model.openOutput(kind: .korean) }
+                Button("브라우저로 열기") { model.openOutput(kind: .bilingual) }
                     .buttonStyle(WorkspaceSecondaryButtonStyle())
-                Button("한영 비교") { model.openOutput(kind: .bilingual) }
-                    .buttonStyle(WorkspacePrimaryButtonStyle(compact: true))
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
@@ -614,12 +614,17 @@ struct WorkspaceView: View {
                                     findCount: $readerFindCount)
                         .accessibilityHidden(readerPreviewEnabled)
                 }
-                .onAppear { readerMode = ReaderProgressStore.mode(for: url) }
+                .onAppear {
+                    readerMode = model.requestedReaderMode ?? ReaderProgressStore.mode(for: url)
+                    model.requestedReaderMode = nil
+                    model.recordDocumentOpened(paperID: readerPaperID)
+                }
                 .onChange(of: url) { newURL in
                     loadedReaderHeadings = []
                     readerScrollTarget = nil
                     readerCurrentAnchor = nil
-                    readerMode = ReaderProgressStore.mode(for: newURL)
+                    readerMode = model.requestedReaderMode ?? ReaderProgressStore.mode(for: newURL)
+                    model.requestedReaderMode = nil
                 }
             } else {
                 EmptyDocumentView(
@@ -627,6 +632,15 @@ struct WorkspaceView: View {
                     subtitle: "새 번역을 시작하면 이곳에서 결과를 읽을 수 있습니다."
                 )
             }
+        }
+        .onChange(of: readerFindVisible) { visible in
+            if !visible {
+                readerFindQuery = ""
+                readerFindRequest += 1
+            }
+        }
+        .onChange(of: readerMode) { _ in
+            if !readerFindQuery.isEmpty { readerFindRequest += 1 }
         }
     }
 
@@ -896,7 +910,7 @@ struct WorkspaceView: View {
     private var readerURL: URL? {
         if readerPreviewEnabled {
             let url = URL(fileURLWithPath: model.repoPath)
-                .appendingPathComponent("outputs/mmdocrag.ko.paper.html")
+                .appendingPathComponent("outputs/mmdocrag.ko-en.paper.html")
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
         guard let selected = model.readerOutputURL() else { return nil }
@@ -1509,20 +1523,12 @@ struct ContentView: View {
             }
             VStack(spacing: 8) {
                 Button {
-                    model.openOutput(kind: .korean)
+                    model.openOutput(kind: .bilingual)
                 } label: {
-                    Label("한국어 열기", systemImage: "doc.text")
+                    Label("논문 열기", systemImage: "rectangle.split.2x1")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassButtonStyle(kind: .primary))
-                .disabled(model.lastPaperID.isEmpty)
-                Button {
-                    model.openOutput(kind: .bilingual)
-                } label: {
-                    Label("한영 병행 열기", systemImage: "rectangle.split.2x1")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassButtonStyle(kind: .secondary))
                 .disabled(model.lastPaperID.isEmpty)
                 Button {
                     model.openOutputsFolder()
@@ -1965,15 +1971,14 @@ final class TranslatorModel: ObservableObject {
 
     func outputURL(kind: OutputKind) -> URL? {
         guard !lastPaperID.isEmpty else { return nil }
-        let rememberedPath = kind == .korean ? lastKoreanOutput : lastBilingualOutput
-        if !rememberedPath.isEmpty {
-            return URL(fileURLWithPath: repoPath).appendingPathComponent(rememberedPath)
+        let repository = URL(fileURLWithPath: repoPath)
+        let candidates = [lastBilingualOutput, "outputs/\(lastPaperID).ko-en.paper.html",
+                          lastKoreanOutput, "outputs/\(lastPaperID).ko.paper.html"]
+        for path in candidates where !path.isEmpty {
+            let url = repository.appendingPathComponent(path)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
         }
-        let suffix = kind == .korean ? ".ko.paper.html" : ".ko-en.paper.html"
-        let url = URL(fileURLWithPath: repoPath)
-                .appendingPathComponent("outputs")
-                .appendingPathComponent("\(lastPaperID)\(suffix)")
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        return nil
     }
 
     func readerOutputURL() -> URL? {
@@ -1983,7 +1988,7 @@ final class TranslatorModel: ObservableObject {
                 return selectedURL
             }
         }
-        return outputURL(kind: .korean)
+        return outputURL(kind: .bilingual)
     }
 
     func loadOutputDocuments() throws -> [OutputDocument] {
@@ -2196,6 +2201,9 @@ final class TranslatorModel: ObservableObject {
         }
         if let bilingual = Self.lastRegexMatch(pattern: #""bilingual_output"\s*:\s*"([^"]+\.ko-en\.paper\.html)""#, in: text) {
             lastBilingualOutput = bilingual
+        }
+        if let output = Self.lastRegexMatch(pattern: #""output"\s*:\s*"([^"]+\.ko-en\.paper\.html)""#, in: text) {
+            lastBilingualOutput = output
         }
     }
 
