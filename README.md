@@ -58,6 +58,21 @@ arXiv/ar5iv 링크를 입력하거나 로컬 PDF를 끌어다 놓습니다. 원�
 
 본문이 180,000자를 넘으면 질문과 관련된 발췌를 선택하고 모델에도 부분 문맥임을 알립니다. 파싱 결과가 없거나 읽을 수 없으면 오류를 표시합니다. 답변의 근거는 현재 논문의 실제 문단 ID와 대조합니다.
 
+## 운영체제 지원 범위
+
+현재 검증한 실행 환경은 **Apple Silicon Mac**입니다. 네이티브 앱과 로컬 OCR을 Windows에서도 같은 방식으로 실행할 수 있다는 의미는 아닙니다.
+
+| 기능 | Apple Silicon Mac | Windows |
+| --- | --- | --- |
+| 네이티브 데스크톱 앱 | 빌드·실행 검증 완료 | Windows 앱 미제공. SwiftUI/AppKit/WebKit 기반 macOS 앱입니다. |
+| Unlimited-OCR 로컬 분석 | MLX 백엔드 연결 및 PDF 파싱 검증 | 현재 MLX 백엔드는 지원하지 않습니다. 별도 OCR 실행 백엔드가 필요합니다. |
+| Python CLI 설치·번역 | 현재 지원 환경 | 필수 `mlx-vlm` 의존성 및 셸 래퍼 때문에 현재 지원·검증하지 않습니다. |
+| 생성된 한영 HTML 읽기 | 앱 또는 브라우저로 열람 | 웹 브라우저로 열람할 수 있는 HTML 형식입니다. Windows 실기기 검증은 하지 않았습니다. |
+
+[uv는 Windows와 macOS를 지원](https://docs.astral.sh/uv/reference/policies/platforms/)하지만, KPaper의 모든 의존성과 앱이 두 운영체제를 지원하는 것은 아닙니다. 현재 로컬 OCR은 [Apple Silicon용 MLX](https://github.com/ml-explore/mlx)를 사용하는 `mlx-vlm` 경로입니다. Intel Mac도 현재 전체 파이프라인 지원 환경으로 검증하지 않았습니다.
+
+Windows 지원을 추가하려면 MLX 의존성을 선택 설치로 분리하고, Windows용 OCR 백엔드와 실행 진입점을 마련해야 합니다. 네이티브 앱은 별도의 Windows UI 구현이 필요합니다.
+
 ## 설치와 인증
 
 macOS 앱은 Swift 빌드 도구와 로컬 Python 실행 환경을 사용합니다. `uv`로 프로젝트 의존성을 설치하세요. Apple Silicon의 MLX OCR을 사용하는 PDF는 첫 실행 때 OCR 모델 준비 시간이 추가될 수 있습니다.
@@ -155,7 +170,7 @@ KPAPER_SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)" ./scripts/build_macos_a
 
 원격 PDF는 `--pdf` 대신 `--pdf-url`을 지정합니다. Hugging Face의 `/blob/…` URL은 다운로드 가능한 `/resolve/…` URL로 변환합니다.
 
-기본 `auto` 백엔드는 `pdf-inspector`로 페이지를 분류하여 가능한 경우 네이티브 PDF 텍스트를 유지하고, OCR이 필요한 페이지에 Unlimited-OCR을 사용합니다. 그림·표·차트·수식 영역을 원본에서 잘라 본문 사이에 배치합니다. `--layout-backend native`와 `--layout-backend unlimited-ocr-mlx`는 특정 경로를 강제할 때 사용합니다.
+기본 `auto` 백엔드는 `pdf-inspector`로 페이지를 분류합니다. Unlimited-OCR은 디지털 페이지에서도 그림·표·차트·수식 영역과 읽기 순서를 분석합니다. 원문 텍스트가 있는 페이지는 PDF에서 직접 추출한 본문을 우선 사용하고, Unlimited-OCR이 찾은 시각 자료 영역과 결합합니다. OCR이 필요한 페이지는 모델이 추출한 본문과 레이아웃을 사용합니다. 시각 자료는 원본 영역을 잘라 본문 사이에 배치합니다. `--layout-backend native`와 `--layout-backend unlimited-ocr-mlx`는 특정 경로를 강제할 때 사용합니다.
 
 ### 결과 파일과 스타일 갱신
 
