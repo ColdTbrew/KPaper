@@ -67,10 +67,17 @@ struct DocumentLibrary {
         let prefix = String(html.prefix(1_000_000))
         let h1 = heading("h1", in: prefix)
         // PDF imports can carry a filename in h1; the first page heading is the paper title.
-        if let h1, !h1.contains("_"), canonical(h1) != canonical(paperID) { return h1 }
+        if let h1, !isPageLabel(h1), !h1.contains("_"), canonical(h1) != canonical(paperID) { return h1 }
         if let firstPage = prefix.range(of: #"<section\b[^>]*\bid=["']page-1["'][^>]*>"#, options: .regularExpression),
-           let title = heading("h2", in: String(prefix[firstPage.upperBound...])) { return title }
-        return h1.map { $0.replacingOccurrences(of: "_", with: " ") } ?? readableID(paperID)
+           let title = heading("h2", in: String(prefix[firstPage.upperBound...])), !isPageLabel(title) { return title }
+        if let h1, !isPageLabel(h1), canonical(h1) != canonical(paperID) {
+            return h1.replacingOccurrences(of: "_", with: " ")
+        }
+        return readableID(paperID)
+    }
+
+    private static func isPageLabel(_ value: String) -> Bool {
+        value.range(of: #"^(?:pdf\s*)?(?:page|페이지)\s*\d+\s*[.:]?$"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private static func heading(_ tag: String, in html: String) -> String? {

@@ -14,11 +14,13 @@ struct DocumentLibraryChecks {
         try write("pdf-import.ko-en.paper.html", "<h1>pdf_import</h1>")
         try write("another.ko-en.paper.html", "<h1>A real &amp; useful title</h1>")
         try write("ignored.html", "ignored")
+        try write("whisper-model.ko.paper.html", "<h1>whisper_model</h1><section id='page-1'><h2>페이지 1</h2></section>")
+        try write("tri-attention.ko.paper.html", "<h1>Page 1</h1><section id='page-1'><h2>PDF Page 1.</h2></section>")
         let pdfFolder = root.appendingPathComponent("inputs/pdfs")
         try FileManager.default.createDirectory(at: pdfFolder, withIntermediateDirectories: true)
         try Data().write(to: pdfFolder.appendingPathComponent("pdf-import.pdf"))
         let documents = try DocumentLibrary.load(from: outputs)
-        precondition(documents.count == 2, "Variants must group by paper ID")
+        precondition(documents.count == 4, "Variants must group by paper ID")
         let imported = documents.first { $0.paperID == "pdf-import" }!
         precondition(imported.title == "실제 논문 제목", "PDF title must come from first-page heading")
         precondition(imported.koreanURL != nil && imported.bilingualURL != nil && imported.originalPDFURL != nil)
@@ -26,6 +28,8 @@ struct DocumentLibraryChecks {
         let another = documents.first { $0.paperID == "another" }!
         precondition(another.title == "A real & useful title")
         precondition(another.koreanURL == nil && another.bilingualURL != nil && another.originalPDFURL == nil)
+        precondition(documents.first { $0.paperID == "whisper-model" }?.title == "whisper model")
+        precondition(documents.first { $0.paperID == "tri-attention" }?.title == "tri attention")
         let history = [RecentDocument(paperID: "pdf-import", openedAt: Date(timeIntervalSince1970: 123))]
         let restored = try JSONDecoder().decode([RecentDocument].self, from: JSONEncoder().encode(history))
         precondition(restored.first?.paperID == history.first?.paperID && restored.first?.openedAt == history.first?.openedAt)
