@@ -1,6 +1,8 @@
-# KPaper 한국어 안내
+# KPaper — Mac용 앱 안내
 
-KPaper의 기본 문서는 한국어로 작성한 **[README.md](README.md)**입니다.
+KPaper는 **Apple Silicon Mac용 논문 리더**입니다. Windows용 앱은 제공하지 않습니다.
+
+기본 문서는 한국어로 작성한 **[README.md](README.md)**입니다.
 
 설치, 인증, 최신 앱 화면과 기능 설명, 논문 질문, PDF·HTML 가져오기, CLI 사용법 및 저장 정책은 기본 문서에서 확인하세요. 현재 앱은 **0.2.0, 빌드 4**이며, 변경 이력은 **[릴리스 반영 사항](RELEASE_NOTES.md)**에 정리합니다.
 

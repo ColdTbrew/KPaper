@@ -1,8 +1,10 @@
-# KPaper
+# KPaper — Mac용 논문 리더
 
 <img src="macos-app/Resources/AppIcon.png" width="80" alt="KPaper 앱 아이콘">
 
-**논문의 구조를 유지한 채 한국어로 읽고, 원문과 비교하며, 논문에 질문하는 macOS 리더입니다.**
+**Apple Silicon Mac용 앱입니다. 논문의 구조를 유지한 채 한국어로 읽고, 원문과 비교하며, 논문에 질문할 수 있습니다.**
+
+> 지원 환경: Apple Silicon Mac. Windows용 앱은 제공하지 않으며, Intel Mac의 전체 파이프라인은 검증하지 않았습니다.
 
 논문을 요약문으로 바꾸는 대신 본문을 충실하게 번역하고 그림·표·수식·인용을 함께 보존합니다. ar5iv HTML을 우선 사용하며, HTML이 없는 논문은 PDF에서 읽기 순서와 레이아웃을 추출합니다. 네이티브 SwiftUI 앱과 CLI는 같은 `uv` 기반 번역 파이프라인을 사용합니다.
 
