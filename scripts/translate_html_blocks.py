@@ -1243,6 +1243,24 @@ def rebase_local_asset_links(soup: BeautifulSoup, source_dir: Path, output_dir: 
         tag[attr] = Path(os.path.relpath(resolved, output_dir.resolve())).as_posix()
 
 
+def canonical_output_path(path: Path) -> Path:
+    """Normalize legacy Korean filenames to the single bilingual reader output."""
+    if path.name.endswith(".ko.paper.html"):
+        return path.with_name(path.name[:-len(".ko.paper.html")] + ".ko-en.paper.html")
+    return path
+
+
+def extract_reader_document(soup: BeautifulSoup, selector: str) -> BeautifulSoup:
+    article = soup.select_one(selector)
+    if not article:
+        raise RuntimeError("Reader document not found: " + selector)
+    document = BeautifulSoup('<html><head></head><body></body></html>', "lxml")
+    if soup.title:
+        document.head.append(BeautifulSoup(str(soup.title), "lxml").title)
+    document.body.append(BeautifulSoup(str(article), "lxml").article)
+    return document
+
+
 def build_bilingual_view(ko_soup: BeautifulSoup, source_soup: BeautifulSoup) -> BeautifulSoup:
     source_copy = BeautifulSoup(str(source_soup), "lxml")
     inject_style(ko_soup)
@@ -1341,7 +1359,7 @@ def main(argv: list[str]) -> None:
     log = log_factory(Path(args.progress_log) if args.progress_log else None)
 
     input_path = Path(args.input).resolve()
-    output_path = Path(args.output).resolve()
+    output_path = canonical_output_path(Path(args.bilingual_output or args.output).resolve())
     cache_path = Path(args.cache).resolve()
     soup = BeautifulSoup(input_path.read_text(encoding="utf-8"), "lxml")
     blocks = collect_blocks(soup)
@@ -1442,19 +1460,12 @@ def main(argv: list[str]) -> None:
     rebase_local_asset_links(soup, input_path.parent, output_path.parent)
     fix_file_viewer_links(soup)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(str(soup), encoding="utf-8")
+    source_soup = BeautifulSoup(input_path.read_text(encoding="utf-8"), "lxml")
+    rebase_local_asset_links(source_soup, input_path.parent, output_path.parent)
+    bilingual = build_bilingual_view(soup, source_soup)
+    output_path.write_text(str(bilingual), encoding="utf-8")
     log(f"wrote {output_path}")
 
-    if args.bilingual_output:
-        bilingual_path = Path(args.bilingual_output).resolve()
-        source_soup = BeautifulSoup(input_path.read_text(encoding="utf-8"), "lxml")
-        rebase_local_asset_links(source_soup, input_path.parent, bilingual_path.parent)
-        korean_soup = BeautifulSoup(str(soup), "lxml")
-        rebase_local_asset_links(korean_soup, output_path.parent, bilingual_path.parent)
-        bilingual = build_bilingual_view(korean_soup, source_soup)
-        bilingual_path.parent.mkdir(parents=True, exist_ok=True)
-        bilingual_path.write_text(str(bilingual), encoding="utf-8")
-        log(f"wrote {bilingual_path}")
 
 
 if __name__ == "__main__":

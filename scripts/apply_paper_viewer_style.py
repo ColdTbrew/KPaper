@@ -5,7 +5,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from translate_html_blocks import build_bilingual_view, fix_file_viewer_links, inject_style, rebase_local_asset_links, restore_source_references, format_pdf_titles
+from translate_html_blocks import build_bilingual_view, fix_file_viewer_links, inject_style, rebase_local_asset_links, restore_source_references, format_pdf_titles, canonical_output_path, extract_reader_document
 
 
 def restore_source_tables(translated: BeautifulSoup, source: BeautifulSoup) -> int:
@@ -57,30 +57,29 @@ def main(argv: list[str]) -> None:
     source_path = Path(argv[2]).resolve() if len(argv) == 3 else None
     if len(argv) == 3:
         output_path = Path(argv[1]).resolve()
-    soup = BeautifulSoup(input_path.read_text(encoding="utf-8"), "lxml")
-    restored = 0
+    output_path = canonical_output_path(Path(bilingual_output).resolve() if bilingual_output else output_path)
+    original = BeautifulSoup(input_path.read_text(encoding="utf-8"), "lxml")
+    if original.select_one("#codex-panel-ko"):
+        soup = extract_reader_document(original, "#codex-panel-ko article.ltx_document")
+    else:
+        soup = original
     if source_path:
         source_soup = BeautifulSoup(source_path.read_text(encoding="utf-8"), "lxml")
         rebase_local_asset_links(source_soup, source_path.parent, output_path.parent)
-        restored = restore_source_tables(soup, source_soup)
-        restore_source_equations(soup, source_soup)
-        restored_references = restore_source_references(soup, source_soup)
-        format_pdf_titles(soup, source_soup)
-    inject_style(soup)
-    fix_file_viewer_links(soup)
-    output_path.write_text(str(soup), encoding="utf-8")
-    print(f"wrote {output_path} restored_tables={restored} restored_references={restored_references if source_path else 0}")
-    if bilingual_output:
-        if not source_path:
-            raise SystemExit("--bilingual-output requires SOURCE_HTML_FOR_TABLES")
-        source_soup = BeautifulSoup(source_path.read_text(encoding="utf-8"), "lxml")
-        bilingual_path = Path(bilingual_output).resolve()
-        korean_soup = BeautifulSoup(str(soup), "lxml")
-        rebase_local_asset_links(source_soup, source_path.parent, bilingual_path.parent)
-        rebase_local_asset_links(korean_soup, output_path.parent, bilingual_path.parent)
-        bilingual = build_bilingual_view(korean_soup, source_soup)
-        bilingual_path.write_text(str(bilingual), encoding="utf-8")
-        print(f"wrote {bilingual_path}")
+    elif original.select_one("#codex-panel-parallel"):
+        source_soup = extract_reader_document(original, "#codex-panel-parallel .codex_parallel_column article.ltx_document")
+        rebase_local_asset_links(source_soup, input_path.parent, output_path.parent)
+    else:
+        raise SystemExit("Legacy Korean HTML requires SOURCE_HTML_FOR_TABLES to build the unified reader")
+    rebase_local_asset_links(soup, input_path.parent, output_path.parent)
+    restored = restore_source_tables(soup, source_soup)
+    restore_source_equations(soup, source_soup)
+    restored_references = restore_source_references(soup, source_soup)
+    format_pdf_titles(soup, source_soup)
+    bilingual = build_bilingual_view(soup, source_soup)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(str(bilingual), encoding="utf-8")
+    print(f"wrote {output_path} restored_tables={restored} restored_references={restored_references}")
 
 
 if __name__ == "__main__":

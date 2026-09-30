@@ -27,12 +27,18 @@ class LocalAssetRebaseTests(unittest.TestCase):
             source.write_text('<html><body><article class="ltx_document"><figure class="codex_pdf_layout_equation" id="eq1"><img src="assets/paper/equation.png"></figure></article></body></html>')
             output.write_text('<html><body><article class="ltx_document"><p id="eq1">broken formula</p><p>한국어 본문</p></article></body></html>')
             bilingual = output.with_name("paper.ko-en.paper.html")
+            legacy_contents = output.read_text()
+            current_input = output
             for _ in range(2):
-                apply_paper_viewer_style.main([str(output), str(output), str(source), "--bilingual-output", str(bilingual)])
-                soup = BeautifulSoup(output.read_text(), "lxml")
+                apply_paper_viewer_style.main([str(current_input), str(output), str(source), "--bilingual-output", str(bilingual)])
+                soup = BeautifulSoup(bilingual.read_text(), "lxml")
                 self.assertEqual(soup.img["src"], "../inputs/assets/paper/equation.png")
                 self.assertNotIn("broken formula", soup.get_text())
                 self.assertIn("한국어 본문", soup.get_text())
+                self.assertEqual(output.read_text(), legacy_contents)
+                self.assertEqual(len(soup.select("#codex-panel-ko")), 1)
+                self.assertEqual(len(soup.select("article.ltx_document")), 3)
+                current_input = bilingual
                 comparison = BeautifulSoup(bilingual.read_text(), "lxml")
                 self.assertEqual([img["src"] for img in comparison.find_all("img")], ["../inputs/assets/paper/equation.png"] * 3)
 

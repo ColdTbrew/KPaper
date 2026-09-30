@@ -110,6 +110,8 @@ def output_stem_from_source(input_path: Path, paper_id: str) -> str:
 
 def bilingual_path_for_output(output_path: Path) -> Path:
     name = output_path.name
+    if name.endswith(".ko-en.paper.html"):
+        return output_path
     if name.endswith(".ko.paper.html"):
         stem = name[: -len(".ko.paper.html")]
     elif name.endswith(".html"):
@@ -134,13 +136,15 @@ def resolve_paths(args: argparse.Namespace) -> dict[str, Path]:
     output_path = (
         Path(args.output)
         if args.output
-        else Path("outputs") / f"{output_stem_from_source(input_path, paper_id)}.ko.paper.html"
+        else Path("outputs") / f"{output_stem_from_source(input_path, paper_id)}.ko-en.paper.html"
     )
     bilingual_output = (
         Path(args.bilingual_output)
         if args.bilingual_output
         else bilingual_path_for_output(output_path)
     )
+    output_path = translate_html_blocks.canonical_output_path(bilingual_output)
+    bilingual_output = output_path
     cache_arg = getattr(args, "cache", "")
     progress_arg = getattr(args, "progress_log", "")
     cache_path = Path(cache_arg) if cache_arg else Path("outputs/cache") / f"{paper_id}.masked.translation.jsonl"
@@ -752,7 +756,12 @@ def command_restyle(args: argparse.Namespace) -> None:
             f"dry_run restyle {paths['output']}",
         )
         return
-    if not paths["output"].exists():
+    restyle_input = paths["output"]
+    if not restyle_input.exists():
+        legacy = restyle_input.with_name(restyle_input.name.replace(".ko-en.paper.html", ".ko.paper.html"))
+        if legacy.exists():
+            restyle_input = legacy
+    if not restyle_input.exists():
         fail(
             f"translated HTML not found: {paths['output']}",
             f"try: scripts/kpaper.py translate --paper-id {args.paper_id} --input {source_path}",
@@ -760,7 +769,7 @@ def command_restyle(args: argparse.Namespace) -> None:
     if not source_path.exists():
         fail(f"source HTML not found: {source_path}")
     restyle_args = [
-        str(paths["output"]),
+        str(restyle_input),
         str(paths["output"]),
         str(source_path),
         "--bilingual-output",
@@ -810,7 +819,7 @@ def add_common_flags(parser: argparse.ArgumentParser) -> None:
 def add_path_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--paper-id", default="", help="stable paper id used for default input/output paths")
     parser.add_argument("--input", default="", help="source ar5iv HTML path; defaults to inputs/<paper-id>.source.html")
-    parser.add_argument("--output", default="", help="Korean output path; defaults to outputs/<paper-id>.ko.paper.html")
+    parser.add_argument("--output", default="", help="unified reader output path; defaults to outputs/<paper-id>.ko-en.paper.html")
     parser.add_argument(
         "--bilingual-output",
         default="",
@@ -896,7 +905,7 @@ def build_parser() -> argparse.ArgumentParser:
     translate = subparsers.add_parser(
         "translate",
         help="translate one paper into Korean reader HTML",
-        description="Translate one source HTML file and write Korean-only plus bilingual reader HTML.",
+        description="Translate one source HTML file and write one reader with Korean and parallel views.",
         epilog=(
             "example: scripts/kpaper.py translate --paper-id my-paper "
             "--source-url https://ar5iv.labs.arxiv.org/html/... --dry-run"

@@ -20,9 +20,8 @@ The pipeline should:
 - Preserve document structure, links, citations, figures, equations, and code/pre/math blocks.
 - Translate normal text blocks as literally as possible.
 - Keep `figure.ltx_table` HTML unchanged and restore tables from source HTML.
-- Produce both:
-  - `*.ko.paper.html`: Korean-only paper reader.
-  - `*.ko-en.paper.html`: Korean view plus `원본 보기`, a two-column English/Korean reader.
+- Produce only `*.ko-en.paper.html`: Korean view plus `원본 보기`, a two-column English/Korean reader.
+- Keep legacy `*.ko.paper.html` readable as input, but never generate or overwrite Korean-only outputs.
 
 ## Important Files
 
@@ -134,13 +133,12 @@ For browser verification:
 Then open generated files, for example:
 
 ```text
-http://127.0.0.1:8799/outputs/mmlongbench-doc.ko.paper.html
 http://127.0.0.1:8799/outputs/mmlongbench-doc.ko-en.paper.html
 ```
 
 Check:
 
-- Korean-only page loads.
+- The unified reader opens in Korean view.
 - Bilingual page opens in Korean view.
 - `원본 보기` switches to a two-column reader.
 - Scroll sync can be turned off and on.

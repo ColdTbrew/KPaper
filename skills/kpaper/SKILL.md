@@ -125,13 +125,12 @@ For layout changes, verify in a browser:
 Open:
 
 ```text
-http://127.0.0.1:8799/outputs/mmlongbench-doc.ko.paper.html
 http://127.0.0.1:8799/outputs/mmlongbench-doc.ko-en.paper.html
 ```
 
 Check:
 
-- The Korean-only reader is readable.
+- The unified reader opens in Korean view.
 - `원본 보기` shows English left and Korean right.
 - Scroll sync off/on works.
 - Turning scroll sync on does not jump the current view.
@@ -165,3 +164,5 @@ Report:
 - Whether API calls were made.
 - Which browser checks passed.
 - Any missing credentials or skipped verification.
+
+Generate only `*.ko-en.paper.html`; keep legacy Korean-only files readable without rewriting them.

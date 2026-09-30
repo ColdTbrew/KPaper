@@ -35,7 +35,7 @@ The bilingual output includes an `원본 보기` mode with English on the left a
 - Keeps `figure.ltx_table` table HTML unchanged to save tokens and avoid breaking tables.
 - Preserves links, citations, figures, equations, code/pre/math blocks, and document structure.
 - Adds a clean paper-viewer style: centered white page, white background, readable typography.
-- Writes Korean-only HTML and bilingual English/Korean HTML.
+- Writes one HTML reader with Korean and English/Korean comparison modes.
 - Provides a two-column bilingual reader with optional scroll sync.
 - Writes JSONL caches so interrupted runs can resume.
 - Includes a native SwiftUI macOS workspace for link/PDF import, live progress, and reading outputs.
@@ -138,11 +138,9 @@ Then run the translation. The default provider is `api`; pass `--provider codex`
 The output files are:
 
 ```text
-outputs/mmdocrag.ko.paper.html
 outputs/mmdocrag.ko-en.paper.html
 ```
 
-`*.ko.paper.html` is the Korean-only viewer.  
 `*.ko-en.paper.html` starts with a Korean-only view. Click `원본 보기` to switch to a two-column reader with English on the left and Korean on the right.
 
 ## macOS App
@@ -281,3 +279,5 @@ If you already have translated HTML and only want to refresh the viewer CSS or r
 ## Notes
 
 Use this for documents you have the right to translate. Full translated paper outputs should stay local unless redistribution is permitted.
+
+Only `*.ko-en.paper.html` is generated. Existing legacy `*.ko.paper.html` files remain readable; restyle uses them as input when the unified file is absent and writes only the unified reader.
