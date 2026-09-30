@@ -124,7 +124,7 @@ def ask(path: Path, request: dict) -> dict:
         "Do not browse, run commands, read files, use tools, or change anything. "
         "If evidence is missing or parsing is damaged, say so explicitly; do not invent facts. "
         "Cite the supplied block ids supporting your answer in citations. Give no citations for facts absent from the paper. "
-        "Use readable LaTeX notation for equations and explain symbols. Return the requested JSON schema."
+        "Write equations in readable plain-text Unicode notation and explain symbols. Do not emit raw LaTeX delimiters or commands because the chat supports Markdown without a math renderer. Return the requested JSON schema."
     )
     # An isolated cwd prevents repository instructions influencing paper answers.
     with tempfile.TemporaryDirectory(prefix="kpaper-qa-") as cwd:
