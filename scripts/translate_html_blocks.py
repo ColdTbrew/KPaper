@@ -402,6 +402,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const tabs = document.querySelector(".codex_tabs");
   let syncEnabled = true;
   let isSyncing = false;
+  let syncGuardVersion = 0;
   let lastScrolledColumn = null;
   let alignmentTimer = null;
   let scrollFrame = null;
@@ -473,11 +474,31 @@ document.addEventListener("DOMContentLoaded", function () {
     element.parentNode.insertBefore(spacer, element);
   }
   function releaseSyncGuard() {
+    const version = ++syncGuardVersion;
     window.setTimeout(() => {
+      if (version !== syncGuardVersion) return;
       captureScrollPositions();
       isSyncing = false;
     }, 120);
   }
+  function performNavigation(operation) {
+    ++syncGuardVersion;
+    isSyncing = true;
+    if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
+    scrollFrame = null;
+    pendingSource = null;
+    columns.forEach((column) => expectedScrolls.delete(column));
+    try {
+      operation();
+    } finally {
+      captureScrollPositions();
+      rebuildScrollMap();
+      releaseSyncGuard();
+    }
+  }
+  // Hosts use this transaction for atomic movement of both panes. The normal
+  // user-scroll handler must not reinterpret a heading jump as scroll deltas.
+  window.kpaperViewer = { performNavigation };
   function alignParallelColumns() {
     if (!isParallelActive()) return;
     removeAlignmentSpacers();

@@ -164,6 +164,14 @@ struct PaperWebPreview: NSViewRepresentable {
       const ensureID = (e, i) => { if (!e.id) e.id = e.closest('[id]')?.id ? e.closest('[id]').id + '-reader-heading-' + i : 'reader-heading-' + i; return e.id; };
       const container = () => { const r=root(); const col=r?.closest('.codex_parallel_column'); return col && getComputedStyle(col).overflowY === 'auto' ? col : document.scrollingElement; };
       const top = e => e.getBoundingClientRect().top - (container() === document.scrollingElement ? 0 : container().getBoundingClientRect().top);
+      function withNavigation(operation) {
+        if(window.kpaperViewer?.performNavigation) return window.kpaperViewer.performNavigation(operation);
+        // Older generated readers still need fresh scroll baselines after a jump.
+        const button = document.querySelector('.codex_sync_button');
+        const enabled = button?.getAttribute?.('aria-pressed') === 'true';
+        if(enabled) button.click();
+        try { operation(); } finally { if(enabled) button.click(); }
+      }
       function report() {
         if(mode === 1) document.querySelectorAll('#codex-panel-parallel .codex_parallel_column article').forEach(r => {
           [...(r.querySelectorAll?.('h2,h3,h4,h5,h6') || [])].filter(e => !e.closest('details')).forEach(ensureID);
@@ -179,6 +187,7 @@ struct PaperWebPreview: NSViewRepresentable {
         mode(value) { value = value === 1 && document.querySelector('#codex-panel-parallel') ? 1 : 0; mode=value; document.body.classList.toggle('kpaper-native-parallel', value===1); document.querySelector('.codex_tab_button[data-target="'+(value===1?'codex-panel-parallel':'codex-panel-ko')+'"]')?.click(); if(value===1) document.scrollingElement.scrollTop=0; setTimeout(report,200); },
         jump(id) {
           const roots = mode === 1 ? [...document.querySelectorAll('#codex-panel-parallel .codex_parallel_column article')] : [root()];
+          withNavigation(() => {
           for (const r of roots) {
             const e = r?.querySelector('#'+CSS.escape(id));
             if (!e) continue;
@@ -187,6 +196,7 @@ struct PaperWebPreview: NSViewRepresentable {
             else e.scrollIntoView({block:'start'});
           }
           if(mode===1) document.scrollingElement.scrollTop=0;
+          });
           setTimeout(report,100);
         },
         restore(id, offset) {
@@ -195,16 +205,18 @@ struct PaperWebPreview: NSViewRepresentable {
           setTimeout(() => {
             const roots = mode === 1 ? [...document.querySelectorAll('#codex-panel-parallel .codex_parallel_column article')] : [root()];
             let found = false;
+            withNavigation(() => {
             for (const r of roots) {
               const e = r?.querySelector('#'+CSS.escape(id));
               if (!e) continue;
               found = true;
-              e.scrollIntoView({block:'start'});
               const col = e.closest('.codex_parallel_column');
               const c = col && getComputedStyle(col).overflowY === 'auto' ? col : document.scrollingElement;
               const y = e.getBoundingClientRect().top - (c === document.scrollingElement ? 0 : c.getBoundingClientRect().top);
               c.scrollTop += y-offset;
             }
+            if(mode===1) document.scrollingElement.scrollTop=0;
+            });
             report();
             if (found) setTimeout(() => { restoring=false; report(); },250);
             else ['wheel','keydown','pointerdown','touchstart'].forEach(type => document.addEventListener(type, () => { restoring=false; }, {once:true}));

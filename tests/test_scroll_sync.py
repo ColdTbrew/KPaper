@@ -78,6 +78,18 @@ columns[1].scrollTop=1000; api.syncFrom(columns[1]);
 assert.equal(columns[0].scrollTop,350);
 columns[0].scrollTop=1000; api.syncFrom(columns[0]);
 assert.equal(columns[1].scrollTop,2000);
+// An atomic heading jump cancels queued user deltas and absorbs both native
+// programmatic scroll events before establishing the next user-scroll baseline.
+columns[0].scrollTop=900; columns[0].fire('scroll');
+assert.equal(frames.size,1);
+context.window.kpaperViewer.performNavigation(() => {
+  columns[0].scrollTop=200; columns[0].fire('scroll');
+  columns[1].scrollTop=500; columns[1].fire('scroll');
+  assert.equal(frames.size,0);
+});
+assert.equal(columns[0].scrollTop,200); assert.equal(columns[1].scrollTop,500);
+columns[0].scrollTop=250; api.syncFrom(columns[0]);
+assert.equal(columns[1].scrollTop,600);
 console.log('viewer synchronization behavior passed');
 '''
         result = subprocess.run([shutil.which('node'), '-e', harness], input=script, text=True, capture_output=True)
