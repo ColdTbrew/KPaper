@@ -859,7 +859,7 @@ struct WorkspaceView: View {
                         Divider().padding(.leading, 18)
                     }
                     SettingRow(title: "모델") {
-                        Picker("모델", selection: $model.selectedModel) {
+                        Picker("모델", selection: $model.activeModel) {
                             ForEach(TranslatorModel.modelOptions, id: \.id) { option in
                                 Text(option.displayName).tag(option.id)
                             }
@@ -868,6 +868,10 @@ struct WorkspaceView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     Divider().padding(.leading, 18)
+                    if model.selectedProvider == .codex {
+                        SettingRow(title: "추론 수준") { Text("Low · 번역 요청에 적용") }
+                        Divider().padding(.leading, 18)
+                    }
                     SettingRow(title: "PDF 레이아웃") {
                         VStack(alignment: .leading, spacing: 5) {
                             Toggle("표·차트·그림을 본문 위치에 삽입", isOn: $model.useAdvancedPDFLayout)
@@ -1496,14 +1500,14 @@ struct ContentView: View {
                 }
                 GridRow {
                     Text("모델")
-                    Picker("Model", selection: $model.selectedModel) {
+                    Picker("Model", selection: $model.activeModel) {
                         ForEach(TranslatorModel.modelOptions, id: \.id) { option in
                             Text(option.displayName).tag(option.id)
                         }
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .onChange(of: model.selectedModel) { _ in
+                    .onChange(of: model.activeModel) { _ in
                         model.saveSettings()
                     }
                     Text("번역 요청에 사용합니다.")
@@ -1730,7 +1734,9 @@ struct ModelOption {
 
 final class TranslatorModel: ObservableObject {
     static let defaultModel = "gpt-5.4-mini"
+    static let defaultCodexModel = "gpt-6-luna"
     static let modelOptions = [
+        ModelOption(displayName: "GPT-6 Luna", id: "gpt-6-luna"),
         ModelOption(displayName: "GPT-5.6 Sol", id: "gpt-5.6"),
         ModelOption(displayName: "GPT-5.6 Terra", id: "gpt-5.6-terra"),
         ModelOption(displayName: "GPT-5.6 Luna", id: "gpt-5.6-luna"),
@@ -1744,6 +1750,11 @@ final class TranslatorModel: ObservableObject {
     @Published var baseURLOverride: String
     @Published var apiKeyOverride = ""
     @Published var selectedModel: String
+    @Published var selectedCodexModel: String
+    var activeModel: String {
+        get { selectedProvider == .codex ? selectedCodexModel : selectedModel }
+        set { if selectedProvider == .codex { selectedCodexModel = newValue } else { selectedModel = newValue } }
+    }
     @Published var selectedProvider: TranslationProvider
     @Published var useAdvancedPDFLayout: Bool
     @Published var codexAuthStatus = "상태를 확인해주세요"
@@ -1796,6 +1807,7 @@ final class TranslatorModel: ObservableObject {
         baseURLOverride = defaults.string(forKey: "baseURLOverride") ?? ""
         let storedModel = defaults.string(forKey: "selectedModel") ?? Self.defaultModel
         selectedModel = Self.modelOptions.contains { $0.id == storedModel } ? storedModel : Self.defaultModel
+        selectedCodexModel = defaults.string(forKey: "selectedCodexModel") ?? Self.defaultCodexModel
         selectedProvider = TranslationProvider(rawValue: defaults.string(forKey: "selectedProvider") ?? "") ?? .api
         useAdvancedPDFLayout = defaults.object(forKey: "useAdvancedPDFLayout") as? Bool ?? true
         if let saved = defaults.data(forKey: "recentDocuments"), let history = try? JSONDecoder().decode([RecentDocument].self, from: saved) {
@@ -1810,6 +1822,7 @@ final class TranslatorModel: ObservableObject {
         defaults.set(repoPath, forKey: "repoPath")
         defaults.set(baseURLOverride, forKey: "baseURLOverride")
         defaults.set(selectedModel, forKey: "selectedModel")
+        defaults.set(selectedCodexModel, forKey: "selectedCodexModel")
         defaults.set(selectedProvider.rawValue, forKey: "selectedProvider")
         defaults.set(useAdvancedPDFLayout, forKey: "useAdvancedPDFLayout")
         appendLog("settings saved")
@@ -2037,7 +2050,7 @@ final class TranslatorModel: ObservableObject {
             repoPath: repoPath,
             baseURLOverride: baseURLOverride.trimmingCharacters(in: .whitespacesAndNewlines),
             apiKeyOverride: apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines),
-            model: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: activeModel.trimmingCharacters(in: .whitespacesAndNewlines),
             provider: selectedProvider,
             useAdvancedPDFLayout: useAdvancedPDFLayout
         )
