@@ -1,291 +1,198 @@
 # KPaper
 
-[English](README.md) | [한국어](README.ko.md)
+<img src="macos-app/Resources/AppIcon.png" width="80" alt="KPaper 앱 아이콘">
 
-Read papers in Korean without losing their original structure. KPaper includes a native macOS workspace, ChatGPT/Codex subscription sign-in, and OpenAI-compatible API support.
+**논문의 구조를 유지한 채 한국어로 읽고, 원문과 비교하며, 논문에 질문하는 macOS 리더입니다.**
 
-The goal is not to summarize a paper. The goal is to keep the paper readable like a normal article page while translating the body text as literally as possible.
+논문을 요약문으로 바꾸는 대신 본문을 충실하게 번역하고 그림·표·수식·인용을 함께 보존합니다. ar5iv HTML을 우선 사용하며, HTML이 없는 논문은 PDF에서 읽기 순서와 레이아웃을 추출합니다. 네이티브 SwiftUI 앱과 CLI는 같은 `uv` 기반 번역 파이프라인을 사용합니다.
 
-## Preview
+현재 앱 릴리스는 **0.2.0, 빌드 4**입니다. 변경 이력은 [릴리스 반영 사항](RELEASE_NOTES.md)을 확인하세요.
 
-Import an arXiv/ar5iv link or drop a PDF into the native macOS app.
+## 앱에서 사용하는 흐름
 
-![KPaper document import](docs/kpaper-lingopaper-v2.png)
+### 1. 논문 가져오기
 
-The app keeps the full workflow in one place: document import, structure-preserving translation progress, and the final paper reader.
+arXiv/ar5iv 링크를 입력하거나 로컬 PDF를 끌어다 놓습니다. 원문을 준비한 뒤 구조 분석, 번역, 리더 스타일 적용 순서로 처리하며 앱에서 진행 상태와 오류를 확인할 수 있습니다. 번역 캐시를 사용하므로 이미 처리한 블록을 재사용할 수 있습니다.
 
-| Translation progress | Built-in paper reader |
-| --- | --- |
-| ![Structure-preserving translation progress](docs/kpaper-progress.png) | ![KPaper built-in reader](docs/kpaper-reader.png) |
+![KPaper 논문 가져오기 화면](docs/kpaper-import.png)
 
-The generated HTML is designed as a quiet paper reader: figures and tables stay in place, citations remain clickable, and the translated body text remains easy to read line by line.
+*링크와 PDF를 같은 가져오기 화면에서 시작합니다. HTML을 사용할 수 있는 논문은 HTML 구조를 유지하고, PDF는 본문과 시각 자료를 추출합니다.*
 
-| Korean reader | English/Korean parallel reader |
-| --- | --- |
-| ![Korean paper reader](docs/korean-reader.png) | ![English and Korean parallel paper reader](docs/parallel-reader.png) |
+### 2. 문서 목록에서 이어 읽기
 
-The bilingual output includes an `원본 보기` mode with English on the left and Korean on the right. Scroll sync is enabled by default, but you can turn it off, adjust either side manually, then turn it back on without moving the current view. Future scrolls continue in sync from that state.
+같은 논문의 출력 파일을 한 항목으로 묶어 보여줍니다. 제목을 검색해 문서를 찾고, 최근 문서에서 마지막에 읽은 논문을 다시 열 수 있습니다. 읽던 위치와 보기 모드는 논문별로 저장하며, 로컬 원본 PDF가 있으면 목록에서 열 수 있습니다.
 
-## Features
+![KPaper 문서 목록](docs/kpaper-library.png)
 
-- Uses ar5iv HTML instead of PDF parsing.
-- Classifies PDFs with `pdf-inspector`, preserves native text when available, and uses Unlimited-OCR MXFP8 only for pages that need OCR.
-- Masks HTML tags before calling the model, then restores the exact tags after translation.
-- Sends only translatable text blocks to the model.
-- Keeps `figure.ltx_table` table HTML unchanged to save tokens and avoid breaking tables.
-- Preserves links, citations, figures, equations, code/pre/math blocks, and document structure.
-- Adds a clean paper-viewer style: centered white page, white background, readable typography.
-- Writes one HTML reader with Korean and English/Korean comparison modes.
-- Provides a two-column bilingual reader with optional scroll sync.
-- Writes JSONL caches so interrupted runs can resume.
-- Includes a native SwiftUI macOS workspace for link/PDF import, live progress, and reading outputs.
-- Supports ChatGPT/Codex subscription authentication without copying OAuth tokens into the app.
-- Keeps OpenAI-compatible API key and custom base URL support as a separate provider.
+*논문 제목을 중심으로 문서를 찾습니다. 최근 문서는 마지막 열람 순서로 최대 50개 논문을 표시합니다.*
 
-## Agent Ready
+### 3. 한국어 본문 읽기
 
-This repository includes instructions for coding agents. If you are using Codex, Claude Code, or a similar agent, give it this repository URL and point it to:
+목차로 절을 이동하고 현재 읽는 절을 확인합니다. `⌘F`로 본문을 검색해 일치하는 구절 사이를 이동할 수 있습니다. 목차 접기와 문서 목록으로 돌아가기는 별도 동작입니다.
 
-- `AGENTS.md` for the full agent operating guide.
-- `CLAUDE.md` for Claude Code-specific defaults.
-- `skills/kpaper/SKILL.md` for reusable skill-style instructions.
+![목차와 한국어 본문을 표시한 KPaper 리더](docs/kpaper-reader.png)
 
-## Setup
+*절 제목은 본문보다 크고 굵게, 문단 앞의 짧은 소제목은 굵게 표시합니다. 긴 논문 제목도 화면 안에서 줄바꿈됩니다.*
 
-Install the local runtime first:
+그림과 표는 본문 흐름 안에 유지합니다. PDF 수식은 원본 영역 이미지로 보존하여 깨진 LaTeX 문자열이 본문에 흩어지는 문제를 줄입니다. 참고문헌은 번역 대상에서 제외하고 원문으로 유지하며, 기본적으로 닫힌 아코디언에서 필요할 때 펼칩니다. 원본 HTML의 링크·인용·코드·수학 블록을 보호하고, 표 HTML은 번역하지 않은 원본을 복원합니다.
+
+### 4. 원문과 나란히 비교
+
+`원본 보기`로 왼쪽 영어 원문과 오른쪽 한국어 번역을 비교합니다. 넓은 창에서는 두 열로 표시하며, 좁은 화면에서는 세로로 배치합니다.
+
+![영어 원문과 한국어 번역을 나란히 표시한 비교 리더](docs/parallel-reader.png)
+
+*대응하는 제목·문단·그림을 기준으로 스크롤 위치를 계산합니다. 영문과 번역문의 길이가 달라도 같은 내용을 따라 읽기 쉽도록 이동량을 조정합니다.*
+
+스크롤 동기화는 기본적으로 켜져 있습니다. 끄면 양쪽을 따로 읽을 수 있으며, 다시 켜도 현재 위치가 갑자기 이동하지 않습니다. 이후 스크롤부터 연결됩니다. 이미지 로딩, 창 크기 변경, 참고문헌 펼치기로 레이아웃이 달라지면 정렬 기준을 다시 계산합니다.
+
+### 5. 논문에 질문
+
+리더에서 `논문에 질문`을 눌러 현재 논문에 대해 질문합니다. 답변은 한국어 Markdown으로 표시하며, 근거 버튼을 누르면 해당 문단으로 이동합니다. 대화는 논문별로 로컬에 저장하고, 실행 중 취소와 오류 확인을 지원합니다.
+
+![GRPO 질문에 대한 답변과 근거를 표시한 논문 질문 패널](docs/kpaper-questions.png)
+
+*논문에서 GRPO가 쓰이는 이유를 질문한 예입니다. 답변 아래의 근거를 선택해 설명의 출처를 본문에서 확인할 수 있습니다.*
+
+질문 기능은 공식 `openai-codex` Python SDK와 Codex의 ChatGPT 로그인을 사용합니다. 기본 모델은 **`gpt-6-luna`**, 추론 강도는 **`low`**입니다. 질문·대화 문맥·파싱된 논문 텍스트와 최대 12개의 로컬 그림·수식 이미지를 Codex에 전달합니다. 외부 웹 검색은 사용하지 않습니다.
+
+본문이 180,000자를 넘으면 질문과 관련된 발췌를 선택하고 모델에도 부분 문맥임을 알립니다. 파싱 결과가 없거나 읽을 수 없으면 오류를 표시합니다. 답변의 근거는 현재 논문의 실제 문단 ID와 대조합니다.
+
+## 설치와 인증
+
+macOS 앱은 Swift 빌드 도구와 로컬 Python 실행 환경을 사용합니다. `uv`로 프로젝트 의존성을 설치하세요. Apple Silicon의 MLX OCR을 사용하는 PDF는 첫 실행 때 OCR 모델 준비 시간이 추가될 수 있습니다.
 
 ```bash
 uv sync
 ```
 
-Then choose one authentication method.
+`uv.lock`에 잠긴 Python 의존성에는 HTML 처리, PDF 분석·OCR, 공식 Codex SDK와 그 런타임이 포함됩니다. 앱 설정에서 프로젝트 경로를 확인하세요.
 
-### Option A: ChatGPT / Codex Subscription
+### ChatGPT / Codex 구독
 
-Install the Codex CLI, then sign in with ChatGPT from the app Settings screen or with:
+로컬 Codex CLI를 준비하고 앱 설정의 `ChatGPT로 로그인` 또는 아래 명령으로 로그인합니다.
 
 ```bash
 codex login
 codex login status
 ```
 
-The app delegates login, credential storage, and refresh to Codex. It does not read or persist the OAuth tokens itself. Select `ChatGPT / Codex subscription` in Settings, then choose a model.
+![인증 방식과 번역 모델을 선택하는 KPaper 설정](docs/kpaper-codex-oauth.png)
 
-The same provider is available from the CLI:
+*설정에서 Codex 구독과 OpenAI 호환 API를 선택합니다. Codex 로그인과 자격증명 관리는 Codex에 위임하고, KPaper는 OAuth 토큰을 직접 읽거나 저장하지 않습니다.*
+
+앱의 Codex 번역 기본 모델은 `gpt-6-luna`, 추론 강도는 `low`입니다. CLI에서도 모델을 생략하면 같은 기본값을 사용하며 `--model`로 명시한 모델은 유지합니다.
 
 ```bash
-./kpaper translate \
-  --paper-id mmdocrag \
-  --provider codex \
-  --model gpt-6-luna
+./kpaper translate --paper-id my-paper --provider codex
 ```
 
-Codex translation defaults to `gpt-6-luna` with `low` reasoning effort; `--model` overrides the model. API translation keeps its `gpt-5.4-mini` default. Codex receives the explicit configuration `model_reasoning_effort="low"` for every batch.
+### OpenAI 호환 API
 
-### Option B: OpenAI-Compatible API
-
-Create the local environment file:
+API 방식은 별도로 지원합니다. 로컬 `.env` 파일을 만들고 제공받은 값을 입력하세요.
 
 ```bash
 cp .env.example .env
 ```
 
-Fill `.env` locally:
-
-```bash
+```dotenv
 OPENAI_API_KEY=...
 OPENAI_BASE_URL=http://host:port/v1
 ```
 
-`.env`, downloaded sources, caches, and generated HTML outputs are ignored by git.
+CLI의 기본 provider는 `api`이며 기본 모델은 `gpt-5.4-mini`입니다. 앱 설정에서 API 주소·모델·임시 API 키를 지정할 수 있고, 입력을 비우면 `.env` 값을 사용합니다. 논문 질문 기능은 API 설정과 별개로 Codex 로그인이 필요합니다.
 
-In the macOS app, select `OpenAI-compatible API` to edit the OpenAI Base URL, choose a model, or temporarily enter an API key. Leaving an override empty uses the corresponding `.env` value.
-
-## Quick Start
-
-For the OpenAI-compatible API provider, check the local environment:
+### 앱 빌드
 
 ```bash
-./kpaper doctor
+./scripts/build_macos_app.sh
+open dist/KPaper.app
 ```
 
-Fetch source HTML with explicit CLI flags:
+빌드 스크립트는 Swift 네이티브 빌드 시스템을 사용하고, Info.plist 검사와 로컬 실행용 ad hoc 서명·검증을 수행합니다. 기본 SDK가 현재 Swift 컴파일러에 없는 매크로를 요구하면 다른 설치된 SDK로 재시도합니다. SDK를 직접 지정할 수도 있습니다.
 
 ```bash
-./kpaper fetch \
-  --paper-id mmdocrag \
-  --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2
+KPAPER_SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)" ./scripts/build_macos_app.sh
 ```
 
-Agent-friendly JSON output is available on every command:
+명시한 SDK는 자동으로 바꾸지 않습니다. 생성한 앱은 로컬 사용용이며 App Store 배포·공증을 뜻하지 않습니다.
+
+## CLI 사용
+
+모든 주요 명령은 `--json`을 지원합니다. 먼저 로컬 환경을 확인합니다.
 
 ```bash
 ./kpaper doctor --json
 ```
 
-Run a dry run to inspect block counts before calling the model:
+### ar5iv HTML 가져오기와 번역
 
 ```bash
-./kpaper translate \
+./kpaper fetch \
   --paper-id mmdocrag \
-  --dry-run
+  --source-url https://ar5iv.labs.arxiv.org/html/2505.16470v2
+
+./kpaper translate --paper-id mmdocrag --provider codex --dry-run
+./kpaper translate --paper-id mmdocrag --provider codex
 ```
 
-Then run the translation. The default provider is `api`; pass `--provider codex` to use the signed-in ChatGPT/Codex subscription instead.
+`--dry-run`은 블록 수와 번역할 분량을 확인하며 번역 모델을 호출하지 않습니다. `translate --source-url`로 가져오기와 번역을 연결할 수도 있습니다.
+
+### PDF 가져오기와 번역
+
+로컬 PDF 또는 PDF URL을 소스 HTML로 변환한 다음 같은 번역 명령을 사용합니다.
 
 ```bash
-./kpaper translate --paper-id mmdocrag
+./kpaper pdf-import \
+  --paper-id my-paper \
+  --pdf /path/to/paper.pdf \
+  --title "논문 제목" \
+  --layout-backend auto
+
+./kpaper translate --paper-id my-paper --provider codex --dry-run
+./kpaper translate --paper-id my-paper --provider codex
 ```
 
-The output files are:
+원격 PDF는 `--pdf` 대신 `--pdf-url`을 지정합니다. Hugging Face의 `/blob/…` URL은 다운로드 가능한 `/resolve/…` URL로 변환합니다.
+
+기본 `auto` 백엔드는 `pdf-inspector`로 페이지를 분류하여 가능한 경우 네이티브 PDF 텍스트를 유지하고, OCR이 필요한 페이지에 Unlimited-OCR을 사용합니다. 그림·표·차트·수식 영역을 원본에서 잘라 본문 사이에 배치합니다. `--layout-backend native`와 `--layout-backend unlimited-ocr-mlx`는 특정 경로를 강제할 때 사용합니다.
+
+### 결과 파일과 스타일 갱신
+
+생성하는 리더는 **`outputs/<논문 제목 기반 파일명>.ko-en.paper.html` 하나**입니다. 제목을 파일명으로 정규화하며, 제목을 사용할 수 없는 경우 논문 ID를 사용합니다. 같은 파일에서 한국어 보기와 한영 비교를 전환합니다.
 
 ```text
-outputs/mmdocrag.ko-en.paper.html
+inputs/<paper-id>.source.html
+inputs/pdfs/<paper-id>.pdf                 # PDF를 가져온 경우
+inputs/assets/<paper-id>/                 # PDF 그림·표·수식 이미지 등
+outputs/<논문 제목 기반 파일명>.ko-en.paper.html
+outputs/cache/<paper-id>.masked.translation.jsonl
 ```
 
-`*.ko-en.paper.html` starts with a Korean-only view. Click `원본 보기` to switch to a two-column reader with English on the left and Korean on the right.
-
-## macOS App
-
-This repo includes a native SwiftUI workspace for local desktop use. The interface and built-in reader are native macOS components, while translation runs through the same `uv`-managed Python pipeline used by `./kpaper`.
-
-Prepare the app runtime with:
+기존 `*.ko.paper.html`은 계속 읽을 수 있지만 새로 생성하거나 덮어쓰지 않습니다. 스타일만 바꾸거나 원본 표·수식을 복원하려면 번역을 반복하지 않고 다음 명령을 사용합니다.
 
 ```bash
-uv sync
+./kpaper restyle --paper-id my-paper
 ```
 
-If you specifically need a standalone `.venv` for scripting outside the app, you can still run:
+통합 리더가 없으면 기존 한국어 파일을 입력으로 사용할 수 있으며 결과는 통합 파일에 저장합니다. 갱신 뒤 앱에서 다시 열거나 브라우저를 새로고침하세요.
+
+### 브라우저에서 열기
 
 ```bash
-./scripts/bootstrap_python_env.sh
+./kpaper serve --port 8799
 ```
 
-Build the app bundle:
+출력 파일의 실제 이름으로 `http://127.0.0.1:8799/outputs/<파일명>.ko-en.paper.html`을 엽니다.
+
+## 개발과 저장 정책
+
+`.env`, `inputs/`, `outputs/`, `.venv/`, 캐시는 로컬 데이터이며 Git에 포함하지 않습니다. README용 `docs/*.png` 스크린샷은 버전 관리합니다. 번역 결과를 외부에 공유할 때는 원문과 번역물의 배포 권한을 확인하세요.
+
+작업 가이드는 [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), [kpaper 스킬](skills/kpaper/SKILL.md)에 있습니다. 구조 보존과 CLI 구현은 `scripts/`, 네이티브 앱은 `macos-app/`에 있습니다.
 
 ```bash
+uv run python -m unittest discover -s tests
+uv run python -m py_compile scripts/*.py
 ./scripts/build_macos_app.sh
 ```
-
-The bundle is written to:
-
-```text
-dist/KPaper.app
-```
-
-Release changes are documented in [RELEASE_NOTES.md](RELEASE_NOTES.md). The build script uses the native Swift build system, validates the bundle, and applies an ad hoc signature for local use. To choose an installed SDK explicitly, run `KPAPER_SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)" ./scripts/build_macos_app.sh`. When the default SDK references missing Swift compiler macros, the script retries another installed SDK; an explicit override is never replaced.
-
-In the app you can:
-
-- Paste an arXiv/ar5iv link or drag and drop a local PDF.
-- Follow import, structure analysis, translation, and viewer styling as distinct progress steps.
-- Monitor preservation status for figures, tables, equations, and citations.
-- Read the Korean output or switch to the English/Korean comparison view.
-- Open the generated HTML or the two-column bilingual reader.
-- Choose between a ChatGPT/Codex subscription and an OpenAI-compatible API.
-- Select GPT-5.6 Sol, Terra, Luna, or another configured model.
-
-The app auto-detects this repository when launched from the repo, and you can edit the project path in Settings.
-
-### Ask the Paper
-
-Open a paper in the native reader and select `논문에 질문`. Ask about the current paper, read the Korean Markdown answer, and select an evidence citation to jump to its paragraph. Chats are saved locally per paper. You can cancel a running question; preparation and execution errors appear in the panel.
-
-This feature requires Codex ChatGPT sign-in and the official `openai-codex` Python SDK installed through `uv sync` with the locked dependencies. It defaults to `gpt-6-luna` with `low` reasoning effort. KPaper sends the question, chat context, parsed paper text, and up to 12 local figure/equation images to Codex. External web search is disabled. For papers exceeding 180,000 characters, the backend selects relevant excerpts and tells the model that the context is partial. Missing or unreadable parsed data produces an explicit error.
-
-### Codex OAuth in Settings
-
-![ChatGPT and Codex subscription sign-in](docs/kpaper-codex-oauth.png)
-
-`ChatGPT / Codex subscription` uses the locally installed Codex runtime. `ChatGPT로 로그인` opens the Codex-managed browser login, and `상태 확인` verifies the current account without exposing tokens to KPaper. The implementation follows the managed authentication boundary documented by the [Codex app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md).
-
-## Translate Another Paper
-
-Pass a new ar5iv URL directly to the CLI. It will derive the default input, output, cache, and bilingual output paths from `--paper-id`.
-
-```bash
-./kpaper translate \
-  --paper-id your-paper \
-  --source-url https://ar5iv.labs.arxiv.org/html/... \
-  --dry-run
-```
-
-Remove `--dry-run` when the block count looks right.
-
-## PDF-Only Papers
-
-If a paper has no ar5iv HTML and only ships as a PDF, import the PDF into source HTML first. On Apple Silicon, the default layout backend uses `sahilchachra/unlimited-ocr-mxfp8-mlx` page by page to recover reading order and grounded block boxes.
-
-```bash
-uv sync
-```
-
-Agents can also add the LiteParse skill instructions with:
-
-```bash
-npx skills add run-llama/llamaparse-agent-skills --skill liteparse
-```
-
-Hugging Face `/blob/...` PDF URLs are normalized to the raw `/resolve/...` PDF URL automatically.
-
-```bash
-./kpaper pdf-import \
-  --paper-id deepseek-v4 \
-  --pdf-url https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf \
-  --title "DeepSeek V4" \
-  --json
-```
-
-This writes:
-
-```text
-inputs/pdfs/deepseek-v4.pdf
-inputs/assets/deepseek-v4/page-0001.png
-inputs/deepseek-v4.source.html
-```
-
-Then use the normal translation command:
-
-```bash
-./kpaper translate --paper-id deepseek-v4 --dry-run
-./kpaper translate --paper-id deepseek-v4
-```
-
-The layout backend reflows text in model reading order and crops detected tables, charts, and figures from the original page between surrounding text blocks. It also keeps page screenshots under `inputs/assets/` as a source-of-truth fallback.
-
-To select the model explicitly:
-
-```bash
-uv sync
-./kpaper pdf-import \
-  --paper-id scanned-paper \
-  --pdf scan.pdf \
-  --layout-backend unlimited-ocr-mlx \
-  --layout-model sahilchachra/unlimited-ocr-mxfp8-mlx
-```
-
-The default `auto` backend uses `pdf-inspector` for page-level routing: born-digital pages use native PDF text and geometry, while scanned or broken-text pages use Unlimited-OCR. Use `--layout-backend native` or `--layout-backend unlimited-ocr-mlx` only to force one path.
-
-## Re-apply Viewer Style or Restore Tables
-
-If you already have translated HTML and only want to refresh the viewer CSS or restore source tables:
-
-```bash
-./kpaper restyle --paper-id mmdocrag
-```
-
-## Scripts
-
-- `kpaper`: CLI wrapper that runs `scripts/kpaper.py` through `uv`.
-- `scripts/kpaper.py`: agent-aware CLI for `doctor`, `fetch`, `translate`, `restyle`, and `serve`.
-- `scripts/translate_html_blocks.py`: masks tags, translates text blocks, restores tags, writes paper-viewer HTML.
-- `scripts/codex_translation_schema.json`: constrains Codex subscription translation batches to deterministic `{id, text}` JSON output.
-- `scripts/apply_paper_viewer_style.py`: reapplies viewer CSS, fixes ar5iv asset links, optionally restores original table HTML.
-- `scripts/bootstrap_python_env.sh`: creates `.venv` without `uv` and installs runtime Python dependencies.
-- `scripts/build_macos_app.sh`: builds the SwiftUI desktop wrapper into `dist/KPaper.app`.
-
-## Notes
-
-Use this for documents you have the right to translate. Full translated paper outputs should stay local unless redistribution is permitted.
-
-Only `*.ko-en.paper.html` is generated. Existing legacy `*.ko.paper.html` files remain readable; restyle uses them as input when the unified file is absent and writes only the unified reader.
