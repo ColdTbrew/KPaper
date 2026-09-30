@@ -187,6 +187,12 @@ In the app you can:
 
 The app auto-detects this repository when launched from the repo, and you can edit the project path in Settings.
 
+### Ask the Paper
+
+Open a paper in the native reader and select `논문에 질문`. Ask about the current paper, read the Korean Markdown answer, and select an evidence citation to jump to its paragraph. Chats are saved locally per paper. You can cancel a running question; preparation and execution errors appear in the panel.
+
+This feature requires Codex ChatGPT sign-in and the official `openai-codex` Python SDK installed through `uv sync` with the locked dependencies. It defaults to `gpt-6-luna` with `low` reasoning effort. KPaper sends the question, chat context, parsed paper text, and up to 12 local figure/equation images to Codex. External web search is disabled. For papers exceeding 180,000 characters, the backend selects relevant excerpts and tells the model that the context is partial. Missing or unreadable parsed data produces an explicit error.
+
 ### Codex OAuth in Settings
 
 ![ChatGPT and Codex subscription sign-in](docs/kpaper-codex-oauth.png)
