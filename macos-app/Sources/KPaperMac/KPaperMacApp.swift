@@ -108,6 +108,7 @@ struct WorkspaceView: View {
     @State private var loadedReaderHeadings: [ReaderHeading] = []
     @State private var readerMode = 0
     @State private var readerOutlineVisible = true
+    @State private var readerQuestionsVisible = false
     @State private var readerCurrentAnchor: String?
     @State private var readerJumpRequest = 0
     @State private var readerFindVisible = false
@@ -577,6 +578,14 @@ struct WorkspaceView: View {
                 .help("본문 검색 (⌘F)")
                 .accessibilityLabel("본문 검색")
 
+                Button {
+                    readerQuestionsVisible.toggle()
+                    if readerQuestionsVisible { readerOutlineVisible = false }
+                } label: { Label("질문", systemImage: "text.bubble") }
+                .buttonStyle(WorkspaceSecondaryButtonStyle())
+                .help("현재 논문에 질문하기")
+                .accessibilityLabel(readerQuestionsVisible ? "논문 질문 닫기" : "논문에 질문")
+
                 Spacer()
 
                 Text(readerPaperID)
@@ -635,6 +644,13 @@ struct WorkspaceView: View {
                                     headings: $loadedReaderHeadings, currentAnchor: $readerCurrentAnchor,
                                     findCount: $readerFindCount)
                         .accessibilityHidden(readerPreviewEnabled)
+                    if readerQuestionsVisible {
+                        Divider()
+                        PaperQuestionView(url: url, repoPath: model.repoPath) { anchor in
+                            readerScrollTarget = anchor
+                            readerJumpRequest += 1
+                        }
+                    }
                 }
                 .onAppear {
                     readerMode = model.requestedReaderMode ?? ReaderProgressStore.mode(for: url)
@@ -2564,7 +2580,7 @@ final class TranslatorModel: ObservableObject {
         return scriptText.contains("load_liteparse") && manifestText.contains("liteparse")
     }
 
-    private static func resolveUVExecutable() -> URL? {
+    static func resolveUVExecutable() -> URL? {
         let fileManager = FileManager.default
         var candidates = ProcessInfo.processInfo.environment["PATH", default: ""]
             .split(separator: ":")
@@ -2582,7 +2598,7 @@ final class TranslatorModel: ObservableObject {
         return nil
     }
 
-    private static func resolveCodexExecutable() -> URL? {
+    static func resolveCodexExecutable() -> URL? {
         let fileManager = FileManager.default
         var candidates = ProcessInfo.processInfo.environment["PATH", default: ""]
             .split(separator: ":")
@@ -2606,7 +2622,7 @@ final class TranslatorModel: ObservableObject {
         return candidates.first { fileManager.isExecutableFile(atPath: $0.path) }
     }
 
-    private static func environmentByAddingToolDirectories(
+    static func environmentByAddingToolDirectories(
         _ environment: [String: String],
         tools: [URL]
     ) -> [String: String] {

@@ -191,6 +191,10 @@ struct PaperWebPreview: NSViewRepresentable {
           for (const r of roots) {
             const e = r?.querySelector('#'+CSS.escape(id));
             if (!e) continue;
+            // Citations may point into a collapsed references section.
+            for (let ancestor=e.parentElement; ancestor; ancestor=ancestor.parentElement) {
+              if (ancestor.tagName === 'DETAILS') ancestor.open = true;
+            }
             const col = e.closest('.codex_parallel_column');
             if (mode === 1 && col) col.scrollTop += e.getBoundingClientRect().top-col.getBoundingClientRect().top-46;
             else e.scrollIntoView({block:'start'});
