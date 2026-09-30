@@ -1103,17 +1103,23 @@ def format_pdf_titles(soup: BeautifulSoup, source: BeautifulSoup | None = None) 
         if source is not None:
             stable_id = tag.get("id") or (tag.parent.get("id") if tag.parent else None)
             match = source.find(id=stable_id) if stable_id else None
+            if match is None and stable_id and stable_id.endswith("-heading"):
+                match = source.find(id=stable_id.removesuffix("-heading"))
             if match:
                 original = match.select_one("p.ltx_p, h2, h3, h4") or match
         source_text = original.get_text(" ", strip=True)
-        numbered = re.match(r"^(\d+(?:\.\d+)*)(?:\.)?\s+\S", source_text)
+        numbered = re.match(r"^(\d+\.(?:\d+\.?)*?)\s+\S", source_text)
         if numbered and len(source_text) <= 160 and not source_text.endswith((".", "!", "?")):
-            level = min(4, 1 + len(numbered.group(1).split(".")))
+            level = min(4, 1 + len(numbered.group(1).rstrip(".").split(".")))
             tag.name = f"h{level}"
             tag["class"] = ["ltx_title", {2: "ltx_title_section", 3: "ltx_title_subsection", 4: "ltx_title_subsubsection"}[level]]
             if not tag.get("id") and tag.parent.get("id"):
                 tag["id"] = tag.parent["id"] + "-heading"
             continue
+        if tag.name == "h2" and str(tag.get("id", "")).endswith("-heading") and original.name == "p":
+            tag.name = "p"
+            tag["class"] = ["ltx_p"]
+            del tag["id"]
         # Short Title Case labels ending in a period are PDF run-in headings.
         # Inspect English source so Korean translations need no guessed label list.
         prefix = re.split(r"\.(?:\s+|(?=[A-Z]))", source_text, maxsplit=1)

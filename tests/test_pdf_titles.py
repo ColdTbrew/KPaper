@@ -28,6 +28,15 @@ class PDFTitleTests(unittest.TestCase):
         self.assertEqual(translated.p.get_text(), text)
         self.assertEqual(translated.a['href'], '#cite')
 
+    def test_affiliation_numbers_are_not_section_headings_and_old_output_is_repaired(self):
+        source = self.document('<div class="codex_pdf_layout_text" id="aff"><p class="ltx_p">1 South China University 2 IDEA 3 Peking University</p></div>')
+        translated = self.document('<div class="codex_pdf_layout_text" id="aff"><h2 class="ltx_title_section" id="aff-heading">1 화남이공대학교 2 IDEA 3 베이징대학교</h2></div>')
+        format_pdf_titles(source)
+        self.assertIsNone(source.h2)
+        format_pdf_titles(translated, source)
+        self.assertIsNone(translated.h2)
+        self.assertEqual(translated.p['class'], ['ltx_p'])
+
     def test_ordinary_sentences_and_references_are_not_emphasized(self):
         soup=self.document('<div class="codex_pdf_layout_text"><p class="ltx_p">We train the model. This is ordinary text.</p></div><div class="codex_pdf_layout_text"><p class="ltx_p">References</p></div><div class="codex_pdf_layout_text"><p class="ltx_p">Box IoU Reward. A cited title.</p></div>')
         format_pdf_titles(soup)
