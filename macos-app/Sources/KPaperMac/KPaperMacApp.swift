@@ -962,7 +962,7 @@ private struct ImportModeSelector: View {
 private struct OutputDocumentRow: View {
     let document: OutputDocument
     var openedAt: Date? = nil
-    let open: (OutputKind) -> Void
+    let open: (OutputKind?) -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -1001,16 +1001,9 @@ private struct OutputDocumentRow: View {
             Spacer(minLength: 12)
 
             HStack(spacing: 8) {
-                if document.koreanURL != nil {
-                    Button("한국어") { open(.korean) }
-                        .buttonStyle(WorkspaceSecondaryButtonStyle())
-                        .accessibilityLabel("\(document.title) 한국어 열기")
-                }
-                if document.bilingualURL != nil {
-                    Button("한영 비교") { open(.bilingual) }
-                        .buttonStyle(WorkspaceSecondaryButtonStyle())
-                        .accessibilityLabel("\(document.title) 한영 비교 열기")
-                }
+                Button("논문 열기") { open(nil) }
+                    .buttonStyle(WorkspaceSecondaryButtonStyle())
+                    .accessibilityLabel("\(document.title) 논문 열기")
                 if let pdf = document.originalPDFURL {
                     Button("원본 PDF") { NSWorkspace.shared.open(pdf) }
                         .buttonStyle(WorkspaceSecondaryButtonStyle())

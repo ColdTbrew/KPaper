@@ -24,11 +24,15 @@ struct DocumentLibraryChecks {
         let imported = documents.first { $0.paperID == "pdf-import" }!
         precondition(imported.title == "실제 논문 제목", "PDF title must come from first-page heading")
         precondition(imported.koreanURL != nil && imported.bilingualURL != nil && imported.originalPDFURL != nil)
-        precondition(imported.url == imported.koreanURL)
+        precondition(imported.url == imported.bilingualURL && imported.isBilingual)
+        precondition(imported.formatLabel.contains("원문 비교"))
         let another = documents.first { $0.paperID == "another" }!
         precondition(another.title == "A real & useful title")
         precondition(another.koreanURL == nil && another.bilingualURL != nil && another.originalPDFURL == nil)
-        precondition(documents.first { $0.paperID == "whisper-model" }?.title == "whisper model")
+        let legacy = documents.first { $0.paperID == "whisper-model" }!
+        precondition(legacy.title == "whisper model")
+        precondition(legacy.url == legacy.koreanURL && !legacy.isBilingual)
+        precondition(legacy.formatLabel == "이전 한국어 파일")
         precondition(documents.first { $0.paperID == "tri-attention" }?.title == "tri attention")
         let history = [RecentDocument(paperID: "pdf-import", openedAt: Date(timeIntervalSince1970: 123))]
         let restored = try JSONDecoder().decode([RecentDocument].self, from: JSONEncoder().encode(history))

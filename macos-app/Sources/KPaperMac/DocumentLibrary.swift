@@ -18,7 +18,7 @@ struct OutputDocument: Identifiable {
 
     var id: String { paperID }
     var fileName: String { url.lastPathComponent }
-    var formatLabel: String { [koreanURL != nil ? "한국어" : nil, bilingualURL != nil ? "한영 비교" : nil, originalPDFURL != nil ? "PDF" : nil].compactMap { $0 }.joined(separator: " · ") }
+    var formatLabel: String { [bilingualURL != nil ? "한국어 · 원문 비교" : "이전 한국어 파일", originalPDFURL != nil ? "PDF" : nil].compactMap { $0 }.joined(separator: " · ") }
     var byteCountLabel: String { ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file) }
 }
 
@@ -47,13 +47,13 @@ struct DocumentLibrary {
         return groups.map { paperID, files in
             let korean = files.first { $0.lastPathComponent.hasSuffix(".ko.paper.html") }
             let bilingual = files.first { $0.lastPathComponent.hasSuffix(".ko-en.paper.html") }
-            let preferred = korean ?? bilingual!
+            let preferred = bilingual ?? korean!
             let pdf = folder.deletingLastPathComponent().appendingPathComponent("inputs/pdfs/\(paperID).pdf")
-            let values = files.compactMap { try? $0.resourceValues(forKeys: keys) }
+            let values = (try? preferred.resourceValues(forKeys: keys))
             return OutputDocument(url: preferred, paperID: paperID,
-                modifiedAt: values.compactMap(\.contentModificationDate).max() ?? .distantPast,
-                byteCount: values.reduce(Int64(0)) { $0 + Int64($1.fileSize ?? 0) },
-                isBilingual: korean == nil, title: title(at: preferred, paperID: paperID),
+                modifiedAt: values?.contentModificationDate ?? .distantPast,
+                byteCount: Int64(values?.fileSize ?? 0),
+                isBilingual: bilingual != nil, title: title(at: korean ?? preferred, paperID: paperID),
                 koreanURL: korean, bilingualURL: bilingual,
                 originalPDFURL: FileManager.default.fileExists(atPath: pdf.path) ? pdf : nil)
         }.sorted {
