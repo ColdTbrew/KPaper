@@ -1865,7 +1865,12 @@ final class TranslatorModel: ObservableObject {
         let paperID = Self.paperID(from: url)
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "URL 번역") { [weak self] workflowID in
-            try await self?.runCommand(["fetch", "--paper-id", paperID, "--source-url", value, "--force", "--json"], settings: settings, workflowID: workflowID)
+            // arXiv links resolve to arxiv.org/html, then ar5iv, then the PDF; any other URL is fetched as HTML.
+            let sourceArguments = Self.isArxivURL(url)
+                ? ["import", value, "--paper-id", paperID, "--progress", "--force", "--json"]
+                    + Self.pdfLayoutArguments(settings: settings)
+                : ["fetch", "--paper-id", paperID, "--source-url", value, "--force", "--json"]
+            try await self?.runCommand(sourceArguments, settings: settings, workflowID: workflowID)
             try Self.validateTranslationProvider(settings: settings)
             try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings, workflowID: workflowID)
             try await self?.runCommand(["restyle", "--paper-id", paperID, "--json"], settings: settings, workflowID: workflowID)
@@ -1901,6 +1906,16 @@ final class TranslatorModel: ObservableObject {
         return true
     }
 
+    private static func pdfLayoutArguments(settings: RuntimeSettings) -> [String] {
+        if settings.useAdvancedPDFLayout {
+            return [
+                "--layout-backend", "auto",
+                "--layout-model", "sahilchachra/unlimited-ocr-mxfp8-mlx"
+            ]
+        }
+        return ["--layout-backend", "liteparse"]
+    }
+
     func translatePDF(_ url: URL) {
         guard url.pathExtension.lowercased() == "pdf" else {
             appendLog("error: only PDF files are supported for drag and drop")
@@ -1910,15 +1925,8 @@ final class TranslatorModel: ObservableObject {
         let title = url.deletingPathExtension().lastPathComponent
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] workflowID in
-            var importArguments = ["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--progress", "--json"]
-            if settings.useAdvancedPDFLayout {
-                importArguments += [
-                    "--layout-backend", "auto",
-                    "--layout-model", "sahilchachra/unlimited-ocr-mxfp8-mlx"
-                ]
-            } else {
-                importArguments += ["--layout-backend", "liteparse"]
-            }
+            let importArguments = ["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--progress", "--json"]
+                + Self.pdfLayoutArguments(settings: settings)
             try await self?.runCommand(importArguments, settings: settings, workflowID: workflowID)
             try Self.validateTranslationProvider(settings: settings)
             try await self?.runCommand(["translate", "--paper-id", paperID, "--provider", settings.provider.rawValue, "--model", settings.model, "--json"], settings: settings, workflowID: workflowID)
@@ -2505,11 +2513,23 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
+    private static let arxivHosts: Set<String> = [
+        "arxiv.org", "www.arxiv.org", "export.arxiv.org",
+        "ar5iv.org", "www.ar5iv.org", "ar5iv.labs.arxiv.org"
+    ]
+
+    private static func isArxivURL(_ url: URL) -> Bool {
+        arxivHosts.contains(url.host?.lowercased() ?? "")
+    }
+
     private static func paperID(from url: URL) -> String {
         let raw = url.absoluteString
-        if let range = raw.range(of: #"(\d{4}\.\d{4,5})v\d+"#, options: .regularExpression) {
-            return "arxiv-" + raw[range].replacingOccurrences(of: #"v\d+$"#, with: "", options: .regularExpression)
-                .replacingOccurrences(of: ".", with: "-")
+        // Same id shapes and `arxiv-<id>` naming as `kpaper import`, e.g. arxiv-1706-03762 or arxiv-hep-th-9901001.
+        let arxivIDPattern = #"^/(?:abs|pdf|html)/(\d{4}\.\d{4,5}|[a-z][a-z\-]*(?:\.[A-Za-z]{2})?/\d{7})"#
+        if isArxivURL(url), let range = url.path.range(of: arxivIDPattern, options: .regularExpression) {
+            let arxivID = url.path[range]
+                .replacingOccurrences(of: #"^/(?:abs|pdf|html)/"#, with: "", options: .regularExpression)
+            return "arxiv-" + arxivID.replacingOccurrences(of: #"[./]"#, with: "-", options: .regularExpression)
         }
         let seed = [url.host ?? "paper", url.deletingPathExtension().lastPathComponent]
             .filter { !$0.isEmpty }

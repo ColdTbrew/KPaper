@@ -62,7 +62,15 @@ Check readiness:
 ./kpaper doctor --json
 ```
 
-Fetch source HTML with explicit flags:
+For an arXiv paper, give `import` any abs/pdf/html/ar5iv link or bare id. It tries `arxiv.org/html`, then ar5iv, then downloads the PDF and runs the `pdf-import` pipeline, and reports the chosen `route` in its JSON:
+
+```bash
+./kpaper import https://arxiv.org/abs/1706.03762 --json
+```
+
+The default paper id is `arxiv-<id>` (for example `arxiv-1706-03762`). Use `--source html` or `--source pdf` to restrict the routes, and `--dry-run` to see the planned URLs without network access.
+
+Fetch a single source HTML with explicit flags (non-arXiv hosts or a fixed URL):
 
 ```bash
 ./kpaper fetch \

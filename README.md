@@ -150,7 +150,24 @@ KPAPER_SWIFT_SDK="$(xcrun --sdk macosx --show-sdk-path)" ./scripts/build_macos_a
 ./kpaper doctor --json
 ```
 
+### arXiv 링크로 한 번에 가져오기
+
+arXiv 링크나 ID만 주면 `import`가 소스를 알아서 고릅니다. `abs`, `pdf`, `html`, ar5iv 주소와 `1706.03762` 같은 ID를 모두 받습니다.
+
+```bash
+./kpaper import https://arxiv.org/abs/1706.03762
+./kpaper translate --paper-id arxiv-1706-03762 --provider codex
+```
+
+1. `arxiv.org/html/<id>`(arXiv 공식 HTML)를 시도합니다.
+2. 없거나 변환에 실패했으면 `ar5iv.labs.arxiv.org/html/<id>`를 시도합니다.
+3. 둘 다 안 되면 `arxiv.org/pdf/<id>`를 내려받아 `pdf-import`와 같은 방식으로 레이아웃을 추출합니다.
+
+HTML 응답은 논문 본문(`ltx_document`와 본문 문단)이 있을 때만 사용합니다. 결과 JSON의 `route`(`arxiv-html`, `ar5iv`, `pdf`)와 `attempts`에서 어느 경로를 썼고 앞 경로가 왜 건너뛰어졌는지 볼 수 있습니다. `--paper-id`를 생략하면 `arxiv-<id>`(예: `arxiv-1706-03762`)를 사용합니다. `--source html`은 PDF로 넘어가지 않고, `--source pdf`는 HTML을 건너뜁니다. `--dry-run`은 네트워크 요청 없이 시도할 주소만 보여줍니다.
+
 ### ar5iv HTML 가져오기와 번역
+
+주소를 직접 지정해 HTML 하나만 내려받으려면 `fetch`를 사용합니다.
 
 ```bash
 ./kpaper fetch \

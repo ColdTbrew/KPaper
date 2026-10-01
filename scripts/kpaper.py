@@ -9,10 +9,12 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import socketserver
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -229,6 +231,101 @@ def download_binary(source_url: str, output_path: Path, force: bool, dry_run: bo
         "output": str(output_path),
         "bytes": output_path.stat().st_size,
     }
+
+
+class ArxivRef(NamedTuple):
+    arxiv_id: str
+    version: str  # "" or "v7"
+
+    @property
+    def versioned(self) -> str:
+        return f"{self.arxiv_id}{self.version}"
+
+    @property
+    def paper_id(self) -> str:
+        return "arxiv-" + re.sub(r"[./]", "-", self.arxiv_id)
+
+
+ARXIV_HOSTS = {
+    "arxiv.org",
+    "www.arxiv.org",
+    "export.arxiv.org",
+    "ar5iv.org",
+    "www.ar5iv.org",
+    "ar5iv.labs.arxiv.org",
+}
+ARXIV_ID_RE = re.compile(
+    r"^(?P<id>\d{4}\.\d{4,5}|[a-z][a-z\-]*(?:\.[A-Za-z]{2})?/\d{7})(?P<version>v\d+)?$"
+)
+ARXIV_PATH_RE = re.compile(r"^/(?:abs|pdf|html)/(?P<ref>.+?)(?:\.pdf)?/?$")
+# A converted paper is a LaTeXML article holding at least an abstract plus one body
+# paragraph; error and placeholder pages do not.
+MIN_PAPER_HTML_PARAGRAPHS = 2
+
+
+def parse_arxiv_reference(value: str) -> ArxivRef | None:
+    """Accept an arXiv abs/pdf/html/ar5iv URL, `arXiv:<id>`, or a bare id."""
+    text = re.sub(r"^arxiv:", "", value.strip(), flags=re.IGNORECASE)
+    parsed = urlparse(text)
+    if parsed.scheme in {"http", "https"}:
+        if (parsed.hostname or "").lower() not in ARXIV_HOSTS:
+            return None
+        path_match = ARXIV_PATH_RE.match(parsed.path)
+        if not path_match:
+            return None
+        text = path_match.group("ref")
+    match = ARXIV_ID_RE.match(text)
+    if not match:
+        return None
+    return ArxivRef(match.group("id"), match.group("version") or "")
+
+
+def arxiv_html_candidates(ref: ArxivRef) -> list[tuple[str, str]]:
+    """Official arXiv HTML first, then the ar5iv conversion of the same paper."""
+    return [
+        ("arxiv-html", f"https://arxiv.org/html/{ref.versioned}"),
+        ("ar5iv", f"https://ar5iv.labs.arxiv.org/html/{ref.versioned}"),
+    ]
+
+
+def arxiv_pdf_url(ref: ArxivRef) -> str:
+    return f"https://arxiv.org/pdf/{ref.versioned}"
+
+
+def looks_like_paper_html(text: str) -> bool:
+    if "ltx_document" not in text:
+        return False
+    article = BeautifulSoup(text, "lxml").select_one("article.ltx_document")
+    if article is None:
+        return False
+    paragraphs = [node for node in article.select(".ltx_p") if node.get_text(strip=True)]
+    return len(paragraphs) >= MIN_PAPER_HTML_PARAGRAPHS
+
+
+def try_fetch_paper_html(url: str) -> tuple[str | None, str]:
+    """Return (html, "") for a usable converted paper, otherwise (None, reason)."""
+    try:
+        response = requests.get(url, timeout=60)
+    except requests.RequestException as exc:
+        return None, f"request failed: {exc.__class__.__name__}"
+    if response.status_code != 200:
+        return None, f"HTTP {response.status_code}"
+    text = response.content.decode("utf-8", errors="replace")
+    if not looks_like_paper_html(text):
+        return None, "response is not converted paper HTML"
+    return text, ""
+
+
+def fetch_arxiv_title(ref: ArxivRef) -> str:
+    """Best-effort title from the abstract page; empty when unavailable."""
+    try:
+        response = requests.get(f"https://arxiv.org/abs/{ref.versioned}", timeout=30)
+        response.raise_for_status()
+    except requests.RequestException:
+        return ""
+    meta = BeautifulSoup(response.content, "lxml").find("meta", attrs={"name": "citation_title"})
+    content = meta.get("content") if meta else ""
+    return " ".join(content.split()) if isinstance(content, str) else ""
 
 
 def load_liteparse() -> Any:
@@ -629,15 +726,18 @@ def command_fetch(args: argparse.Namespace) -> None:
     emit(args, {"ok": True, "result": result}, f"{result['status']} {result['output']}")
 
 
-def command_pdf_import(args: argparse.Namespace) -> None:
-    paper_id = args.paper_id
-    pdf_path = Path(args.pdf) if args.pdf else Path("inputs/pdfs") / f"{paper_id}.pdf"
-    html_path = Path(args.output) if args.output else Path("inputs") / f"{paper_id}.source.html"
-    assets_dir = Path(args.assets_dir) if args.assets_dir else Path("inputs/assets") / paper_id
+def import_pdf(
+    args: argparse.Namespace,
+    paper_id: str,
+    pdf_url: str,
+    pdf_path: Path,
+    html_path: Path,
+    assets_dir: Path,
+    title: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     fetch_result = None
-    if args.pdf_url:
-        fetch_result = download_binary(args.pdf_url, pdf_path, args.force, args.dry_run)
-    title = args.title or paper_id
+    if pdf_url:
+        fetch_result = download_binary(pdf_url, pdf_path, args.force, args.dry_run)
     import_result = pdf_to_source_html(
         pdf_path=pdf_path,
         html_path=html_path,
@@ -652,6 +752,23 @@ def command_pdf_import(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
         progress_enabled=args.progress,
     )
+    return fetch_result, import_result
+
+
+def command_pdf_import(args: argparse.Namespace) -> None:
+    paper_id = args.paper_id
+    pdf_path = Path(args.pdf) if args.pdf else Path("inputs/pdfs") / f"{paper_id}.pdf"
+    html_path = Path(args.output) if args.output else Path("inputs") / f"{paper_id}.source.html"
+    assets_dir = Path(args.assets_dir) if args.assets_dir else Path("inputs/assets") / paper_id
+    fetch_result, import_result = import_pdf(
+        args,
+        paper_id=paper_id,
+        pdf_url=args.pdf_url,
+        pdf_path=pdf_path,
+        html_path=html_path,
+        assets_dir=assets_dir,
+        title=args.title or paper_id,
+    )
     payload = {
         "ok": True,
         "dry_run": args.dry_run,
@@ -663,6 +780,96 @@ def command_pdf_import(args: argparse.Namespace) -> None:
         },
     }
     emit(args, payload, f"{import_result['status']} {html_path}")
+
+
+def command_import(args: argparse.Namespace) -> None:
+    ref = parse_arxiv_reference(args.url)
+    if ref is None:
+        fail(
+            f"not an arXiv paper reference: {args.url}",
+            "pass an arxiv.org abs/pdf/html or ar5iv URL, or a bare id such as 1706.03762",
+        )
+    paper_id = args.paper_id or ref.paper_id
+    html_path = Path(args.output) if args.output else Path("inputs") / f"{paper_id}.source.html"
+    candidates = arxiv_html_candidates(ref) if args.source in {"auto", "html"} else []
+    pdf_url = arxiv_pdf_url(ref) if args.source in {"auto", "pdf"} else ""
+    base_payload: dict[str, Any] = {
+        "ok": True,
+        "arxiv_id": ref.versioned,
+        "paper_id": paper_id,
+        "output": str(html_path),
+    }
+    translate_command = f"./kpaper translate --paper-id {shlex.quote(paper_id)}"
+    if args.output:
+        translate_command += f" --input {shlex.quote(str(html_path))}"
+    next_steps = {
+        "dry_run_translate": f"{translate_command} --dry-run",
+        "translate": translate_command,
+    }
+
+    if html_path.exists() and not args.force:
+        payload = {**base_payload, "status": "exists", "next": next_steps}
+        emit(args, payload, f"exists {html_path}")
+        return
+    if args.dry_run:
+        payload = {
+            **base_payload,
+            "status": "dry_run",
+            "html_candidates": [{"route": route, "url": url} for route, url in candidates],
+            "pdf_url": pdf_url,
+            "next": next_steps,
+        }
+        emit(args, payload, f"dry_run import {ref.versioned} -> {html_path}")
+        return
+
+    attempts: list[dict[str, str]] = []
+    for route, url in candidates:
+        text, reason = try_fetch_paper_html(url)
+        if text is None:
+            attempts.append({"route": route, "url": url, "reason": reason})
+            continue
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.write_text(text, encoding="utf-8")
+        payload = {
+            **base_payload,
+            "status": "wrote",
+            "route": route,
+            "source_url": url,
+            "bytes": html_path.stat().st_size,
+            "attempts": attempts,
+            "next": next_steps,
+        }
+        emit(args, payload, f"wrote {html_path} via {route}")
+        return
+
+    if not pdf_url:
+        details = "; ".join(f"{item['route']}: {item['reason']}" for item in attempts)
+        fail(
+            f"no HTML version of arXiv:{ref.versioned} is available ({details})",
+            "retry without --source html to fall back to the PDF",
+        )
+    for item in attempts:
+        print(f"note: {item['route']} unavailable ({item['reason']}); falling back to PDF", file=sys.stderr)
+    fetch_result, import_result = import_pdf(
+        args,
+        paper_id=paper_id,
+        pdf_url=pdf_url,
+        pdf_path=Path("inputs/pdfs") / f"{paper_id}.pdf",
+        html_path=html_path,
+        assets_dir=Path("inputs/assets") / paper_id,
+        title=args.title or fetch_arxiv_title(ref) or paper_id,
+    )
+    payload = {
+        **base_payload,
+        "status": import_result["status"],
+        "route": "pdf",
+        "source_url": pdf_url,
+        "attempts": attempts,
+        "fetch": fetch_result,
+        "result": import_result,
+        "next": next_steps,
+    }
+    emit(args, payload, f"{import_result['status']} {html_path} via pdf")
 
 
 def command_translate(args: argparse.Namespace) -> None:
@@ -827,6 +1034,34 @@ def add_path_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_pdf_layout_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="stream machine-readable KPAPER_PROGRESS events before the final result",
+    )
+    parser.add_argument("--title", default="", help="document title for the generated source HTML")
+    parser.add_argument("--image-dpi", type=int, default=144)
+    parser.add_argument("--max-pages", type=int, default=0, help="limit imported pages; 0 means all pages")
+    parser.add_argument(
+        "--layout-backend",
+        choices=("auto", "native", "liteparse", "unlimited-ocr-mlx"),
+        default="auto",
+        help="layout source: automatic pdf-inspector routing, Unlimited-OCR MLX, native PDF geometry, or LiteParse",
+    )
+    parser.add_argument(
+        "--layout-model",
+        default=pdf_layout.DEFAULT_LAYOUT_MODEL,
+        help="Hugging Face model id used by --layout-backend unlimited-ocr-mlx",
+    )
+    parser.add_argument(
+        "--layout-max-tokens",
+        type=int,
+        default=8192,
+        help="maximum grounded layout tokens generated per page",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kpaper",
@@ -868,39 +1103,39 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_common_flags(pdf_import)
-    pdf_import.add_argument(
-        "--progress",
-        action="store_true",
-        help="stream machine-readable KPAPER_PROGRESS events before the final result",
-    )
+    add_pdf_layout_flags(pdf_import)
     pdf_import.add_argument("--paper-id", required=True)
     pdf_import.add_argument("--pdf-url", default="", help="remote PDF URL; Hugging Face /blob/... URLs are normalized to /resolve/...")
     pdf_import.add_argument("--pdf", default="", help="local PDF path; defaults to inputs/pdfs/<paper-id>.pdf")
     pdf_import.add_argument("--output", default="", help="source HTML path; defaults to inputs/<paper-id>.source.html")
     pdf_import.add_argument("--assets-dir", default="", help="page image directory; defaults to inputs/assets/<paper-id>")
-    pdf_import.add_argument("--title", default="", help="document title for the generated source HTML")
-    pdf_import.add_argument("--image-dpi", type=int, default=144)
-    pdf_import.add_argument("--max-pages", type=int, default=0, help="limit imported pages; 0 means all pages")
-    pdf_import.add_argument(
-        "--layout-backend",
-        choices=("auto", "native", "liteparse", "unlimited-ocr-mlx"),
-        default="auto",
-        help="layout source: automatic pdf-inspector routing, Unlimited-OCR MLX, native PDF geometry, or LiteParse",
-    )
-    pdf_import.add_argument(
-        "--layout-model",
-        default=pdf_layout.DEFAULT_LAYOUT_MODEL,
-        help="Hugging Face model id used by --layout-backend unlimited-ocr-mlx",
-    )
-    pdf_import.add_argument(
-        "--layout-max-tokens",
-        type=int,
-        default=8192,
-        help="maximum grounded layout tokens generated per page",
-    )
     pdf_import.add_argument("--force", action="store_true", help="overwrite existing downloaded PDF")
     pdf_import.add_argument("--dry-run", action="store_true")
     pdf_import.set_defaults(func=command_pdf_import)
+
+    import_cmd = subparsers.add_parser(
+        "import",
+        help="import an arXiv paper: HTML first, PDF as fallback",
+        description=(
+            "Resolve an arXiv link or id to source HTML in inputs/. Tries arxiv.org/html, then ar5iv, "
+            "then downloads the PDF and runs the pdf-import layout pipeline."
+        ),
+        epilog="example: scripts/kpaper.py import https://arxiv.org/abs/1706.03762",
+    )
+    add_common_flags(import_cmd)
+    add_pdf_layout_flags(import_cmd)
+    import_cmd.add_argument("url", help="arXiv abs/pdf/html or ar5iv URL, or a bare id such as 1706.03762")
+    import_cmd.add_argument("--paper-id", default="", help="defaults to arxiv-<id>, e.g. arxiv-1706-03762")
+    import_cmd.add_argument("--output", default="", help="source HTML path; defaults to inputs/<paper-id>.source.html")
+    import_cmd.add_argument(
+        "--source",
+        choices=("auto", "html", "pdf"),
+        default="auto",
+        help="auto: HTML then PDF fallback; html: never fall back to PDF; pdf: skip HTML",
+    )
+    import_cmd.add_argument("--force", action="store_true", help="overwrite existing source HTML and downloaded PDF")
+    import_cmd.add_argument("--dry-run", action="store_true", help="show the planned routes without any network or file writes")
+    import_cmd.set_defaults(func=command_import)
 
     translate = subparsers.add_parser(
         "translate",

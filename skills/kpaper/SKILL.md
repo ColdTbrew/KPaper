@@ -50,6 +50,12 @@ Check readiness:
 ./kpaper doctor --json
 ```
 
+Import an arXiv paper from any abs/pdf/html/ar5iv link or id (arxiv.org/html, then ar5iv, then PDF):
+
+```bash
+./kpaper import https://arxiv.org/abs/1706.03762 --json
+```
+
 Fetch source HTML:
 
 ```bash
