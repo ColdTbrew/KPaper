@@ -14,6 +14,24 @@ import apply_paper_viewer_style  # noqa: E402
 
 
 class LocalAssetRebaseTests(unittest.TestCase):
+    def test_arxiv_svg_object_and_embed_links_are_absolute(self) -> None:
+        soup = BeautifulSoup('<figure><object data="1706.03762v7/making_more_difficult5_new.svg" type="image/svg+xml"></object><embed src="1706.03762v7/attention.svg"></figure>', 'lxml')
+        translate_html_blocks.fix_file_viewer_links(soup)
+        self.assertEqual(soup.object['data'], 'https://arxiv.org/html/1706.03762v7/making_more_difficult5_new.svg')
+        self.assertEqual(soup.embed['src'], 'https://arxiv.org/html/1706.03762v7/attention.svg')
+
+    def test_local_svg_object_is_rebased(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source_dir = root / 'inputs'
+            output_dir = root / 'outputs'
+            source_dir.mkdir()
+            output_dir.mkdir()
+            (source_dir / 'figure.svg').write_text('<svg/>')
+            soup = BeautifulSoup('<object data="figure.svg" type="image/svg+xml"></object>', 'lxml')
+            translate_html_blocks.rebase_local_asset_links(soup, source_dir, output_dir)
+            self.assertEqual(soup.object['data'], '../inputs/figure.svg')
+
     def test_restyle_restores_equation_with_output_relative_asset(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

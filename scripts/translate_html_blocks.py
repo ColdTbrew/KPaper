@@ -1247,8 +1247,8 @@ def document_base_url(soup: BeautifulSoup) -> str:
 
 def fix_file_viewer_links(soup: BeautifulSoup) -> None:
     base_url = document_base_url(soup)
-    for tag in soup.find_all(["img", "link", "script", "a", "source"]):
-        attr = "href" if tag.name in {"a", "link"} else "src"
+    for tag in soup.find_all(["img", "link", "script", "a", "source", "object", "embed"]):
+        attr = "data" if tag.name == "object" else "href" if tag.name in {"a", "link"} else "src"
         value = tag.get(attr)
         if not isinstance(value, str):
             continue
@@ -1272,8 +1272,8 @@ def fix_file_viewer_links(soup: BeautifulSoup) -> None:
 
 def rebase_local_asset_links(soup: BeautifulSoup, source_dir: Path, output_dir: Path) -> None:
     """Keep generated local assets valid when HTML moves from inputs/ to outputs/."""
-    for tag in soup.find_all(["img", "link", "script", "source"]):
-        attr = "href" if tag.name == "link" else "src"
+    for tag in soup.find_all(["img", "link", "script", "source", "object", "embed"]):
+        attr = "data" if tag.name == "object" else "href" if tag.name == "link" else "src"
         value = tag.get(attr)
         if not isinstance(value, str) or not value:
             continue
