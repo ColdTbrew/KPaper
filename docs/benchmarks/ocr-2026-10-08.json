@@ -1,0 +1,133 @@
+{
+  "measured_on": "2026-10-08",
+  "hardware": "Apple M4, 24GB unified memory",
+  "python": "3.14.3",
+  "packages": {
+    "mlx": "0.32.0",
+    "mlx-vlm": "0.6.4",
+    "pymupdf": "1.28.0",
+    "liteparse": "2.0.1",
+    "pdf-inspector": "1.14.2"
+  },
+  "input": {
+    "name": "kaldi-2011.pdf",
+    "sha256": "07f6ee1b47c832c96476b6495c3a2d0fd770799eb4e7d352ec776f751f4c303e",
+    "selected_pages": [
+      1,
+      2,
+      3
+    ]
+  },
+  "settings": {
+    "backend": "auto",
+    "model": "sahilchachra/unlimited-ocr-mxfp8-mlx",
+    "dpi": 144,
+    "max_output_tokens": 8192,
+    "model_downloaded_before_measurement": true,
+    "translation_api_called": false
+  },
+  "metrics": {
+    "memory": "MLX allocator bytes, not total Python RSS",
+    "time": "Python monotonic duration inside pdf_to_source_html; excludes outer uv startup",
+    "gb_divisor": 1000000000
+  },
+  "trials": [
+    {
+      "case": "baseline",
+      "seconds": 52.690713958931156,
+      "mlx_peak_bytes": 5791976846,
+      "mlx_active_after_bytes": 1044,
+      "mlx_cache_after_bytes": 3979528542,
+      "pages": 3,
+      "text_blocks_including_headings": 59,
+      "figures": 0,
+      "tables": 1,
+      "layout_fallbacks": 0,
+      "runtime": null
+    },
+    {
+      "case": "serial_vision",
+      "seconds": 47.07082200003788,
+      "mlx_peak_bytes": 5337310456,
+      "mlx_active_after_bytes": 1044,
+      "mlx_cache_after_bytes": 0,
+      "pages": 3,
+      "text_blocks_including_headings": 59,
+      "figures": 1,
+      "tables": 1,
+      "layout_fallbacks": 0,
+      "runtime": {
+        "generated_pages": 3,
+        "cache_hits": 0,
+        "peak_mlx_bytes": 5337310456
+      }
+    },
+    {
+      "case": "attention_chunked_trial_1",
+      "seconds": 50.058164083980955,
+      "mlx_peak_bytes": 4401520140,
+      "mlx_active_after_bytes": 1044,
+      "mlx_cache_after_bytes": 0,
+      "pages": 3,
+      "text_blocks_including_headings": 59,
+      "figures": 1,
+      "tables": 1,
+      "layout_fallbacks": 0,
+      "runtime": {
+        "generated_pages": 3,
+        "cache_hits": 0,
+        "peak_mlx_bytes": 4401520140
+      }
+    },
+    {
+      "case": "attention_chunked_trial_2",
+      "seconds": 46.12856104201637,
+      "mlx_peak_bytes": 4401520880,
+      "mlx_active_after_bytes": 1044,
+      "mlx_cache_after_bytes": 0,
+      "pages": 3,
+      "text_blocks_including_headings": 59,
+      "figures": 1,
+      "tables": 1,
+      "layout_fallbacks": 0,
+      "runtime": {
+        "generated_pages": 3,
+        "cache_hits": 0,
+        "peak_mlx_bytes": 4401520880
+      }
+    },
+    {
+      "case": "cached_reimport",
+      "seconds": 0.5589247499592602,
+      "mlx_peak_bytes": 0,
+      "mlx_active_after_bytes": 0,
+      "mlx_cache_after_bytes": 0,
+      "pages": 3,
+      "text_blocks_including_headings": 59,
+      "figures": 1,
+      "tables": 1,
+      "layout_fallbacks": 0,
+      "runtime": {
+        "generated_pages": 0,
+        "cache_hits": 3,
+        "peak_mlx_bytes": 0
+      }
+    }
+  ],
+  "quality_checks": {
+    "digital_native_body_blocks_identical": 58,
+    "digital_text_blocks_including_heading": 59,
+    "browser_figure_and_table_images_loaded": true,
+    "scan_pages": 1,
+    "scan_body_blocks": 10,
+    "scan_visual_crops": 1,
+    "scan_feature_extraction_and_acoustic_model_headings_recovered": true
+  },
+  "validation": {
+    "full_regression_tests": 95,
+    "ocr_regression_tests": 12,
+    "sam_attention_rtol": 1e-05,
+    "sam_attention_atol": 1e-05
+  },
+  "interpretation": "One PDF, one baseline trial, two final cold-page-cache trials. Neither independent optimization ablations nor general OCR accuracy benchmarks."
+}
