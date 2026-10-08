@@ -144,10 +144,12 @@ struct WorkspaceView: View {
         .fileImporter(
             isPresented: $isFileImporterPresented,
             allowedContentTypes: [.pdf],
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            model.translatePDF(url)
+            guard case .success(let urls) = result else { return }
+            for url in urls {
+                model.translatePDF(url)
+            }
         }
         .onChange(of: model.isRunning) { running in
             if running {
@@ -410,7 +412,7 @@ struct WorkspaceView: View {
         .scaleEffect(isDropTargeted ? 1.006 : 1)
         .animation(reduceMotion ? .linear(duration: 0.1) : .spring(response: 0.28, dampingFraction: 0.84), value: isDropTargeted)
         .accessibilityLabel("PDF 가져오기")
-        .accessibilityHint("클릭하거나 PDF 파일을 끌어다 놓으세요")
+        .accessibilityHint("클릭해 여러 PDF 파일을 선택하거나 PDF 파일을 끌어다 놓으세요")
     }
 
     private var progressScreen: some View {
