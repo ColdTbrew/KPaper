@@ -16,4 +16,5 @@ macos-app/.build/
 macos-app/.swiftpm/
 .clang-module-cache/
 .swiftpm-cache/
+.swift-module-cache/
 .uv-cache/

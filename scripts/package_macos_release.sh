@@ -19,10 +19,10 @@ KPaper.app을 Applications 폴더로 복사하세요.
 1. https://github.com/ColdTbrew/KPaper 에서 저장소를 내려받습니다.
 2. uv를 설치한 뒤 저장소 폴더에서 uv sync를 실행합니다.
 3. 앱 설정의 프로젝트 경로를 해당 저장소 폴더로 지정합니다.
-4. Codex/ChatGPT 로그인 또는 OpenAI 호환 API를 설정합니다.
+4. ChatGPT 로그인, Codex CLI 또는 OpenAI 호환 API를 설정합니다.
 
 Unlimited-OCR 모델은 처음 사용할 때 내려받을 수 있습니다.
-질문 기능은 Codex 로그인이 필요합니다.
+질문 기능은 ChatGPT 로그인 또는 Codex CLI 연결로 사용할 수 있습니다.
 앱은 로컬 실행용 ad hoc 서명이며 Apple 공증은 적용하지 않았습니다.
 지원·설치 설명: https://github.com/ColdTbrew/KPaper#readme
 TEXT

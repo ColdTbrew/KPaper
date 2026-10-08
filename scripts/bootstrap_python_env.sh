@@ -25,9 +25,9 @@ fi
 
 if .venv/bin/python -m pip --version >/dev/null 2>&1; then
   .venv/bin/python -m pip install --upgrade pip
-  .venv/bin/python -m pip install beautifulsoup4 liteparse lxml mlx-vlm pillow pymupdf requests
+  .venv/bin/python -m pip install beautifulsoup4 liteparse lxml mlx-vlm pillow pymupdf requests 'pyjwt[crypto]'
 elif command -v uv >/dev/null 2>&1; then
-  uv pip install --python .venv/bin/python beautifulsoup4 liteparse lxml mlx-vlm pillow pymupdf requests
+  uv pip install --python .venv/bin/python beautifulsoup4 liteparse lxml mlx-vlm pillow pymupdf requests 'pyjwt[crypto]'
 else
   echo "pip is unavailable in .venv and uv was not found" >&2
   exit 1

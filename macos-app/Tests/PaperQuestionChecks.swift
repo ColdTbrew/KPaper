@@ -1,7 +1,11 @@
 import Foundation
+import SwiftUI
 
 // Compile with PaperQuestionView.swift, without the application entry point.
-final class TranslatorModel {
+enum TranslationProvider { case chatgpt, codex, api }
+final class TranslatorModel: ObservableObject {
+    var selectedProvider: TranslationProvider = .codex
+    var selectedChatGPTModel = "gpt-6-luna"
     static func resolveUVExecutable() -> URL? { URL(fileURLWithPath: ProcessInfo.processInfo.environment["QA_TEST_UV"]!) }
     static func resolveCodexExecutable() -> URL? { nil }
     static func environmentByAddingToolDirectories(_ environment: [String: String], tools: [URL]) -> [String: String] { environment }

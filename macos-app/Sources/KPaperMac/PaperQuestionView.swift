@@ -65,7 +65,7 @@ final class PaperQuestionModel: ObservableObject {
         process = nil
         isRunning = false
     }
-    func send(repoPath: String) {
+    func send(repoPath: String, provider: String = "codex", selectedModel: String = "gpt-6-luna") {
         let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isRunning, let documentURL else { return }
         guard let uv = TranslatorModel.resolveUVExecutable() else {
@@ -73,7 +73,7 @@ final class PaperQuestionModel: ObservableObject {
             return
         }
         let history = messages.map { ["role": $0.role, "content": $0.content] }
-        let request = ["question": text, "history": history, "model": "gpt-6-luna"] as [String: Any]
+        let request = ["question": text, "history": history, "model": selectedModel, "provider": provider] as [String: Any]
         let requestURL = FileManager.default.temporaryDirectory.appendingPathComponent("kpaper-question-\(UUID().uuidString).json")
         do { try JSONSerialization.data(withJSONObject: request).write(to: requestURL, options: .atomic) }
         catch { self.error = "질문을 준비하지 못했습니다: \(error.localizedDescription)"; return }
@@ -124,6 +124,7 @@ final class PaperQuestionModel: ObservableObject {
                     self.process = nil
                     self.requestID = nil
                     self.isRunning = false
+                    NotificationCenter.default.post(name: .init("KPaperChatGPTUsageChanged"), object: nil)
                     if let response {
                         self.messages.append(PaperQuestionMessage(role: "assistant", content: response.answer, citations: response.citations))
                         self.save()
@@ -137,6 +138,7 @@ final class PaperQuestionModel: ObservableObject {
 }
 
 struct PaperQuestionView: View {
+    @EnvironmentObject private var settings: TranslatorModel
     let url: URL
     let repoPath: String
     let jump: (String) -> Void
@@ -159,7 +161,7 @@ struct PaperQuestionView: View {
                         .disabled(model.isRunning || model.messages.isEmpty)
                 }
                 Text("현재 논문을 근거로 답변합니다.").font(.caption).foregroundStyle(.secondary)
-                Text("질문과 논문 내용이 Codex로 전송됩니다.").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("질문과 논문 내용이 OpenAI로 전송됩니다.").font(.system(size: 10)).foregroundStyle(.secondary)
             }.padding(16)
             Divider()
             ScrollViewReader { proxy in
@@ -210,14 +212,14 @@ struct PaperQuestionView: View {
                     .textFieldStyle(.roundedBorder).lineLimit(2...5)
                     .focused($composerFocused)
                     .accessibilityLabel("논문 질문")
-                    .onSubmit { model.send(repoPath: repoPath) }
+                    .onSubmit { sendQuestion() }
                 HStack {
-                    Text("gpt-6-luna · low").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text("\(settings.selectedProvider == .chatgpt ? settings.selectedChatGPTModel : "gpt-6-luna") · low").font(.system(size: 10)).foregroundStyle(.secondary)
                     Spacer()
                     if model.isRunning {
                         Button("취소") { model.cancel() }.buttonStyle(.bordered)
                     } else {
-                        Button("질문 보내기") { model.send(repoPath: repoPath) }
+                        Button("질문 보내기") { sendQuestion() }
                             .buttonStyle(.borderedProminent)
                             .disabled(model.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
@@ -233,5 +235,11 @@ struct PaperQuestionView: View {
             Button("대화 지우기", role: .destructive) { model.clearConversation() }
             Button("취소", role: .cancel) { }
         }
+    }
+
+    private func sendQuestion() {
+        model.send(repoPath: repoPath,
+                   provider: settings.selectedProvider == .chatgpt ? "chatgpt" : "codex",
+                   selectedModel: settings.selectedProvider == .chatgpt ? settings.selectedChatGPTModel : "gpt-6-luna")
     }
 }

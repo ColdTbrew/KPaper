@@ -7,11 +7,13 @@ import WebKit
 @main
 struct KPaperMacApp: App {
     @StateObject private var model = TranslatorModel()
+    @StateObject private var chatgpt = ChatGPTConnection()
 
     var body: some Scene {
         WindowGroup {
             WorkspaceView()
                 .environmentObject(model)
+                .environmentObject(chatgpt)
                 .frame(minWidth: 820, minHeight: 640)
         }
         .windowStyle(.hiddenTitleBar)
@@ -97,6 +99,7 @@ private enum DebugLogStore {
 
 struct WorkspaceView: View {
     @EnvironmentObject private var model: TranslatorModel
+    @EnvironmentObject private var chatgpt: ChatGPTConnection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var stage: WorkspaceStage = .importDocument
     @State private var destination: SidebarDestination = .translation
@@ -169,18 +172,31 @@ struct WorkspaceView: View {
                 reloadOutputDocuments()
             }
         }
+        .task {
+            chatgpt.refresh(repoPath: model.repoPath)
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 10_000_000_000) }
+                catch { break }
+                chatgpt.refreshUsage(repoPath: model.repoPath)
+                chatgpt.refreshWeeklyUsage(repoPath: model.repoPath)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("KPaperChatGPTUsageChanged"))) { _ in
+            chatgpt.refreshUsage(repoPath: model.repoPath)
+            chatgpt.refreshWeeklyUsage(repoPath: model.repoPath, force: true)
+        }
         .animation(reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.34, dampingFraction: 0.92), value: stage)
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 9) {
                 Image(systemName: "book.closed.fill").font(.system(size: 17, weight: .medium))
                     .accessibilityHidden(true)
                 Text("KPaper").font(.system(size: 17, weight: .semibold)).tracking(-0.4)
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 22)
+            .padding(.bottom, 18)
             SidebarButton(title: "새 번역", icon: "plus", isSelected: destination == .translation) {
                 destination = .translation
                 stage = .importDocument
@@ -202,7 +218,7 @@ struct WorkspaceView: View {
                 Text("진행 중")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(WorkspacePalette.tertiaryText)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 12)
                     .padding(.top, 10)
 
                 ForEach(model.runningJobs) { job in
@@ -219,7 +235,7 @@ struct WorkspaceView: View {
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                         }
-                        .padding(.horizontal, 18)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .contentShape(Rectangle())
                     }
@@ -228,19 +244,25 @@ struct WorkspaceView: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 16)
 
-            Divider().padding(.horizontal, 12)
+            ChatGPTUsageSidebar {
+                destination = .settings
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+
+            Divider()
             Text("논문을 읽는 작업 공간")
-                .font(.system(size: 11))
+                .font(.system(size: 10))
                 .foregroundStyle(WorkspacePalette.secondaryText)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.vertical, 8)
         }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 14)
-        .padding(.top, 34)
-        .frame(width: 184, alignment: .topLeading)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 12)
+        .padding(.top, 22)
+        .frame(width: 208, alignment: .topLeading)
         .background(WorkspacePalette.sidebar)
     }
 
@@ -270,55 +292,63 @@ struct WorkspaceView: View {
 
     private var importScreen: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 22) {
                 screenHeader(
                     step: "1",
                     title: "문서 가져오기",
                     subtitle: "웹 링크 또는 PDF 파일을 추가하세요."
                 )
 
-                ImportModeSelector(selection: $importMode)
-
-                if importMode == .web {
-                    urlImportPanel
-                } else {
-                    pdfImportPanel
-                }
-
-                HStack(spacing: 14) {
-                    LanguageMenu(title: "원본 언어", value: "자동 감지", icon: "character.book.closed")
-                    LanguageMenu(title: "번역 언어", value: "한국어", icon: "globe")
-                }
-
-                Button {
+                VStack(alignment: .leading, spacing: 18) {
+                    ImportModeSelector(selection: $importMode)
                     if importMode == .web {
-                        model.translateURL(sourceURL)
+                        urlImportPanel
                     } else {
-                        isFileImporterPresented = true
-                    }
-                } label: {
-                    HStack {
-                        Spacer()
-                        Text(importMode == .web ? "번역 시작" : "PDF 선택")
-                        Image(systemName: "arrow.right")
-                        Spacer()
+                        pdfImportPanel
                     }
                 }
-                .buttonStyle(WorkspacePrimaryButtonStyle())
-                .disabled(importMode == .web && sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .padding(18)
+                .background(WorkspacePalette.panel.opacity(0.45))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(WorkspacePalette.border.opacity(0.75)))
+
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(spacing: 12) {
+                        LanguageMenu(title: "원본 언어", value: "자동 감지", icon: "character.book.closed")
+                        LanguageMenu(title: "번역 언어", value: "한국어", icon: "globe")
+                    }
+
+                    Button {
+                        if importMode == .web {
+                            model.translateURL(sourceURL)
+                        } else {
+                            isFileImporterPresented = true
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text(importMode == .web ? "번역 시작" : "PDF 선택")
+                            Image(systemName: "arrow.right")
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(WorkspacePrimaryButtonStyle())
+                    .disabled(importMode == .web && sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
             .frame(maxWidth: 600, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.vertical, 32)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
     private var urlImportPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("논문 링크")
                 .font(.system(size: 13, weight: .semibold))
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 TextField("https://arxiv.org/abs/…", text: $sourceURL)
                     .accessibilityLabel("논문 링크")
                     .textFieldStyle(WorkspaceTextFieldStyle())
@@ -349,18 +379,20 @@ struct WorkspaceView: View {
     }
 
     private func pdfDropZone(compact: Bool) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             Image(systemName: isDropTargeted ? "doc.fill.badge.plus" : "doc.badge.plus")
-                .font(.system(size: compact ? 28 : 36, weight: .regular))
+                .font(.system(size: compact ? 23 : 32, weight: .regular))
                 .foregroundStyle(isDropTargeted ? WorkspacePalette.blue : WorkspacePalette.secondaryText)
             Text(isDropTargeted ? "놓아서 번역 시작" : "PDF 파일을 드래그하거나 클릭하여 선택하세요.")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(WorkspacePalette.secondaryText)
+                .multilineTextAlignment(.center)
             Text("최대 200MB")
                 .font(.system(size: 11))
                 .foregroundStyle(WorkspacePalette.tertiaryText)
         }
-        .frame(maxWidth: .infinity, minHeight: compact ? 148 : 190)
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, minHeight: compact ? 112 : 176)
         .background(isDropTargeted ? WorkspacePalette.blue.opacity(0.07) : WorkspacePalette.controlFill)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
@@ -852,7 +884,14 @@ struct WorkspaceView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     Divider().padding(.leading, 18)
-                    if model.selectedProvider == .codex {
+                    if model.selectedProvider == .chatgpt {
+                        SettingRow(title: "ChatGPT 계정") { ChatGPTConnectionSettings() }
+                        Divider().padding(.leading, 18)
+                        if chatgpt.planEnabled {
+                            SettingRow(title: "GPT 사용량") { ChatGPTUsageView() }
+                            Divider().padding(.leading, 18)
+                        }
+                    } else if model.selectedProvider == .codex {
                         SettingRow(title: "Codex 계정") {
                             HStack(spacing: 10) {
                                 Circle()
@@ -877,12 +916,20 @@ struct WorkspaceView: View {
                     }
                     SettingRow(title: "모델") {
                         Picker("모델", selection: $model.activeModel) {
-                            ForEach(TranslatorModel.modelOptions, id: \.id) { option in
-                                Text(option.displayName).tag(option.id)
+                            if model.selectedProvider == .chatgpt {
+                                ForEach(chatgpt.models) { option in
+                                    Text(option.display_name).tag(option.id)
+                                }
+                                if chatgpt.models.isEmpty { Text("로그인 후 모델 선택").tag(model.activeModel) }
+                            } else {
+                                ForEach(TranslatorModel.modelOptions, id: \.id) { option in
+                                    Text(option.displayName).tag(option.id)
+                                }
                             }
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .disabled(model.selectedProvider == .chatgpt && chatgpt.models.isEmpty)
                     }
                     Divider().padding(.leading, 18)
                     if model.selectedProvider == .codex {
@@ -1084,7 +1131,6 @@ private struct SidebarButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 8)
     }
 }
 
@@ -1722,6 +1768,7 @@ private struct GlassButtonStyle: ButtonStyle {
 }
 
 enum TranslationProvider: String, CaseIterable, Identifiable {
+    case chatgpt
     case codex
     case api
 
@@ -1729,7 +1776,8 @@ enum TranslationProvider: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .codex: return "ChatGPT / Codex 구독"
+        case .chatgpt: return "ChatGPT 로그인"
+        case .codex: return "Codex CLI"
         case .api: return "OpenAI 호환 API"
         }
     }
@@ -1768,9 +1816,22 @@ final class TranslatorModel: ObservableObject {
     @Published var apiKeyOverride = ""
     @Published var selectedModel: String
     @Published var selectedCodexModel: String
+    @Published var selectedChatGPTModel: String
     var activeModel: String {
-        get { selectedProvider == .codex ? selectedCodexModel : selectedModel }
-        set { if selectedProvider == .codex { selectedCodexModel = newValue } else { selectedModel = newValue } }
+        get {
+            switch selectedProvider {
+            case .chatgpt: return selectedChatGPTModel
+            case .codex: return selectedCodexModel
+            case .api: return selectedModel
+            }
+        }
+        set {
+            switch selectedProvider {
+            case .chatgpt: selectedChatGPTModel = newValue
+            case .codex: selectedCodexModel = newValue
+            case .api: selectedModel = newValue
+            }
+        }
     }
     @Published var selectedProvider: TranslationProvider
     @Published var useAdvancedPDFLayout: Bool
@@ -1825,7 +1886,8 @@ final class TranslatorModel: ObservableObject {
         let storedModel = defaults.string(forKey: "selectedModel") ?? Self.defaultModel
         selectedModel = Self.modelOptions.contains { $0.id == storedModel } ? storedModel : Self.defaultModel
         selectedCodexModel = defaults.string(forKey: "selectedCodexModel") ?? Self.defaultCodexModel
-        selectedProvider = TranslationProvider(rawValue: defaults.string(forKey: "selectedProvider") ?? "") ?? .api
+        selectedChatGPTModel = defaults.string(forKey: "selectedChatGPTModel") ?? Self.defaultCodexModel
+        selectedProvider = TranslationProvider(rawValue: defaults.string(forKey: "selectedProvider") ?? "") ?? .chatgpt
         useAdvancedPDFLayout = defaults.object(forKey: "useAdvancedPDFLayout") as? Bool ?? true
         if let saved = defaults.data(forKey: "recentDocuments"), let history = try? JSONDecoder().decode([RecentDocument].self, from: saved) {
             recentDocuments = history.sorted { $0.openedAt > $1.openedAt }
@@ -1840,6 +1902,7 @@ final class TranslatorModel: ObservableObject {
         defaults.set(baseURLOverride, forKey: "baseURLOverride")
         defaults.set(selectedModel, forKey: "selectedModel")
         defaults.set(selectedCodexModel, forKey: "selectedCodexModel")
+        defaults.set(selectedChatGPTModel, forKey: "selectedChatGPTModel")
         defaults.set(selectedProvider.rawValue, forKey: "selectedProvider")
         defaults.set(useAdvancedPDFLayout, forKey: "useAdvancedPDFLayout")
         appendLog("settings saved")
@@ -1865,6 +1928,9 @@ final class TranslatorModel: ObservableObject {
         let paperID = Self.paperID(from: url)
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "URL 번역") { [weak self] workflowID in
+            if settings.provider == .chatgpt {
+                try await self?.runCommand(["chatgpt", "check", "--json"], settings: settings, workflowID: workflowID)
+            }
             // arXiv links resolve to arxiv.org/html, then ar5iv, then the PDF; any other URL is fetched as HTML.
             let sourceArguments = Self.isArxivURL(url)
                 ? ["import", value, "--paper-id", paperID, "--progress", "--force", "--json"]
@@ -1925,6 +1991,9 @@ final class TranslatorModel: ObservableObject {
         let title = url.deletingPathExtension().lastPathComponent
         let settings = runtimeSettings()
         startWorkflow(paperID: paperID, title: "PDF 번역") { [weak self] workflowID in
+            if settings.provider == .chatgpt {
+                try await self?.runCommand(["chatgpt", "check", "--json"], settings: settings, workflowID: workflowID)
+            }
             let importArguments = ["pdf-import", "--paper-id", paperID, "--pdf", url.path, "--title", title, "--progress", "--json"]
                 + Self.pdfLayoutArguments(settings: settings)
             try await self?.runCommand(importArguments, settings: settings, workflowID: workflowID)
@@ -1942,7 +2011,9 @@ final class TranslatorModel: ObservableObject {
     }
 
     func checkConnection() {
-        if selectedProvider == .codex {
+        if selectedProvider == .chatgpt {
+            NotificationCenter.default.post(name: .init("KPaperRefreshChatGPT"), object: nil)
+        } else if selectedProvider == .codex {
             refreshCodexStatus()
         } else {
             runDoctor()
@@ -2315,6 +2386,7 @@ final class TranslatorModel: ObservableObject {
             }
         }
         syncRunningState(status: status)
+        NotificationCenter.default.post(name: .init("KPaperChatGPTUsageChanged"), object: nil)
     }
 
     private func syncRunningState(status: String) {
@@ -2326,6 +2398,19 @@ final class TranslatorModel: ObservableObject {
 
     private static func userFacingCommandError(from output: String) -> String {
         let lowercased = output.lowercased()
+        // Tracebacks contain variable names such as args.timeout; inspect explicit errors first.
+        if lowercased.contains("model is not supported") || lowercased.contains("model_not_found") {
+            return "선택한 모델을 이 계정에서 사용할 수 없습니다. 모델과 Codex CLI 버전을 확인해주세요."
+        }
+        if lowercased.contains("subscription_sharing_usage_limit_exceeded") {
+            return "KPaper의 ChatGPT 사용 한도에 도달했습니다. ChatGPT 설정의 사용량을 확인해주세요."
+        }
+        if lowercased.contains("subscription_sharing_user_not_eligible") {
+            return "이 계정 또는 워크스페이스에서 ChatGPT 요금제 사용을 지원하지 않습니다."
+        }
+        if lowercased.contains("login_required") || lowercased.contains("plan_permission_required") {
+            return "설정에서 Continue with ChatGPT로 로그인하고 요금제 사용을 허용해주세요."
+        }
         if lowercased.contains("503") || lowercased.contains("service unavailable") {
             return "번역 서비스 API가 정상적이지 않습니다. 잠시 후 다시 시도해주세요."
         }
@@ -2335,7 +2420,7 @@ final class TranslatorModel: ObservableObject {
         if lowercased.contains("429") || lowercased.contains("too many requests") || lowercased.contains("rate limit") {
             return "번역 요청이 너무 많습니다. 잠시 후 다시 시도해주세요."
         }
-        if lowercased.contains("timed out") || lowercased.contains("timeout") {
+        if lowercased.contains("timed out") || lowercased.contains("timeoutexpired") || lowercased.contains("readtimeout") {
             return "번역 서비스 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
         }
         if lowercased.contains("connection refused") || lowercased.contains("connection error") || lowercased.contains("failed to establish") {
@@ -2344,7 +2429,7 @@ final class TranslatorModel: ObservableObject {
         return "번역 중 오류가 발생했습니다. 번역 서비스 설정을 확인해주세요."
     }
 
-    private static func terminateProcessTree(_ process: Process) {
+    static func terminateProcessTree(_ process: Process) {
         guard process.isRunning else { return }
         let children = Process()
         children.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
@@ -2659,6 +2744,7 @@ final class TranslatorModel: ObservableObject {
     }
 
     private static func validateTranslationProvider(settings: RuntimeSettings) throws {
+        if settings.provider == .chatgpt { return }
         if settings.provider == .codex {
             guard resolveCodexExecutable() != nil else {
                 throw AppError.message("Codex CLI를 찾을 수 없습니다. Codex를 설치하고 ChatGPT로 로그인해주세요.")

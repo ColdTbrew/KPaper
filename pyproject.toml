@@ -12,6 +12,7 @@ dependencies = [
   "pdf-inspector>=1.14.2",
   "pillow>=12.1.1",
   "pymupdf>=1.28.0",
+  "pyjwt[crypto]>=2.10.1",
   "requests>=2.33.1",
 ]
 

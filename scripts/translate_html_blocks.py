@@ -1050,7 +1050,18 @@ def call_api(
 
 
 def translation_model(provider: str, requested: str | None = None) -> str:
-    return requested or ("gpt-6-luna" if provider == "codex" else "gpt-5.4-mini")
+    return requested or ("gpt-6-luna" if provider in ("codex", "chatgpt") else "gpt-5.4-mini")
+
+
+def call_chatgpt(model: str, batch: list[tuple[str, str]], timeout: int, retries: int):
+    import chatgpt_auth
+    schema = json.loads(Path(__file__).with_name("codex_translation_schema.json").read_text())
+    prompt = USER_PROMPT.format(items_json=json.dumps([{"id": bid, "text": text} for bid, text in batch], ensure_ascii=False))
+    raw, usage = chatgpt_auth.request_json(model, SYSTEM_PROMPT,
+        [{"role": "user", "content": prompt}], schema, timeout, retries)
+    parsed = extract_json(raw)
+    return ({str(item["id"]): str(item["text"]) for item in parsed["translations"]},
+            int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)))
 
 
 def call_codex(
@@ -1385,7 +1396,7 @@ def main(argv: list[str]) -> None:
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--cache", required=True)
-    parser.add_argument("--provider", choices=("api", "codex"), default="api")
+    parser.add_argument("--provider", choices=("api", "codex", "chatgpt"), default="api")
     parser.add_argument("--model", default="", help="Codex default: gpt-6-luna; API default: gpt-5.4-mini")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--max-chars", type=int, default=5000)
@@ -1437,12 +1448,17 @@ def main(argv: list[str]) -> None:
         raise SystemExit("OPENAI_API_KEY and OPENAI_BASE_URL are required for the api provider")
     if args.provider == "codex" and not (os.environ.get("CODEX_EXECUTABLE") or shutil.which("codex")):
         raise SystemExit("codex CLI is required for the codex provider")
+    if args.provider == "chatgpt":
+        import chatgpt_auth
+        chatgpt_auth.access_token()
 
     batches = make_batches(todo, args.max_chars)
-    concurrency = max(1, min(args.concurrency, 3 if args.provider == "codex" else args.concurrency))
+    concurrency = max(1, min(args.concurrency, 3 if args.provider in ("codex", "chatgpt") else args.concurrency))
     log(f"translating {len(batches)} batches provider={args.provider} concurrency={concurrency}")
 
     def translate_batch(batch: list[tuple[str, str]]) -> tuple[dict[str, str], int, int]:
+        if args.provider == "chatgpt":
+            return call_chatgpt(args.model, batch, args.timeout, args.max_retries)
         if args.provider == "codex":
             return call_codex(args.model, batch, args.timeout, args.max_retries)
         return call_api(base_url, api_key, args.model, batch, args.timeout, args.max_retries)

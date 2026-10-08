@@ -85,9 +85,33 @@ uv sync
 
 `uv.lock`에 잠긴 Python 의존성에는 HTML 처리, PDF 분석·OCR, 공식 Codex SDK와 그 런타임이 포함됩니다. 앱 설정에서 프로젝트 경로를 확인하세요.
 
-### ChatGPT / Codex 구독
+### Sign in with ChatGPT
 
-로컬 Codex CLI를 준비하고 앱 설정의 `ChatGPT로 로그인` 또는 아래 명령으로 로그인합니다.
+앱 설정에서 **ChatGPT 로그인 → Continue with ChatGPT**를 선택합니다. 브라우저에서 계정과 워크스페이스를 선택하고 KPaper의 요금제 사용을 허용하면, API 키 없이 번역과 논문 질문을 사용할 수 있습니다. 연결된 계정을 바꾸거나 추가하고, **사용량 관리**에서 KPaper의 한도를 관리할 수 있습니다.
+
+왼쪽 사이드바에서 오늘 토큰·요청 수와 최근 7일 선 그래프를 확인합니다. **상세 통계** 또는 설정의 **GPT 사용량**에서 오늘·최근 30일 토큰과 요청 수, 입력·출력 토큰 구성 게이지, 최근 7일 사용량을 확인합니다. 이 Mac의 KPaper가 서버에서 받은 토큰 수만 연결 계정별로 집계하며, 새 버전의 첫 요청부터 기록합니다. 앱을 사용하는 동안 10초마다 갱신하고, 조회에는 모델 호출이 필요하지 않습니다. 실패·중단된 요청도 서버가 보고한 토큰은 포함합니다. 사용량 기록에는 문서·질문·답변·인증 토큰을 저장하지 않습니다.
+
+**Weekly usage**는 공식 [Codex app-server의 사용 한도 조회](https://learn.chatgpt.com/docs/app-server#6-rate-limits-chatgpt)로 기존 Codex 로그인 계정의 주간 잔량과 초기화 시간을 표시합니다. KPaper 연결 계정과 Codex 계정의 이메일이 일치할 때만 표시하며, 1분마다 갱신합니다. 모델을 호출하거나 KPaper의 OAuth 토큰을 Codex에 전달하지 않습니다. 계정이 다르거나 주간 값이 없으면 조회 불가 상태로 표시합니다. 이 게이지는 Codex 주간 한도이며, KPaper의 Sign in with ChatGPT 앱 한도와는 구분됩니다.
+
+KPaper의 ChatGPT 앱 한도는 이 로그인 API가 제공하지 않습니다. 입력·출력 토큰 구성 게이지는 한도의 잔량·백분율을 의미하지 않으며, **사용량 관리**에서 계정·앱 한도를 확인할 수 있습니다. 공식 [사용량 안내](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions#tracking-usage)와 [UI 지침](https://developers.openai.com/siwc/ui-ux-guidelines#link-to-chatgpt-usage)도 ChatGPT 사용량 설정으로 연결하도록 안내합니다.
+
+이 기능은 OpenAI의 [오픈소스 앱용 Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)를 사용합니다. 계정별 모델 목록을 조회하고 선택한 모델로 `https://api.openai.com/v1/responses`를 호출합니다. 요청은 `store: false`, `stream: true`이며, 완료 이벤트를 받은 응답만 저장합니다. 이용 가능 여부는 계정·요금제·워크스페이스 정책에 따릅니다.
+
+```bash
+./kpaper chatgpt login --json
+./kpaper chatgpt usage --json
+./kpaper chatgpt weekly --json
+./kpaper chatgpt status --json
+./kpaper chatgpt models --json
+./kpaper translate --paper-id my-paper --provider chatgpt
+./kpaper chatgpt logout --json
+```
+
+KPaper의 연결은 Codex CLI 로그인과 별도로 관리합니다. 계정 정보와 OAuth 자격증명은 `~/Library/Application Support/KPaper/ChatGPT/`에 사용자만 읽을 수 있는 파일로 저장하며, 토큰을 로그나 저장소에 남기지 않습니다. 토큰 갱신은 병렬 번역 작업 사이에서 직렬화합니다. 로그아웃 후에도 계정 등록 정보와 호스트 ID를 유지해 다음 로그인에 재사용합니다.
+
+### Codex CLI 구독
+
+로컬 Codex CLI를 준비하고 앱 설정의 **Codex CLI → ChatGPT로 로그인** 또는 아래 명령으로 로그인합니다.
 
 ```bash
 codex login
@@ -96,7 +120,7 @@ codex login status
 
 ![인증 방식과 번역 모델을 선택하는 KPaper 설정](docs/kpaper-codex-oauth.png)
 
-*설정에서 Codex 구독과 OpenAI 호환 API를 선택합니다. Codex 로그인과 자격증명 관리는 Codex에 위임하고, KPaper는 OAuth 토큰을 직접 읽거나 저장하지 않습니다.*
+*Codex CLI 방식의 로그인과 자격증명 관리는 Codex에 위임합니다. 이 방식은 KPaper 전용 Sign in with ChatGPT 연결과 별개입니다.*
 
 앱의 Codex 번역 기본 모델은 `gpt-6-luna`, 추론 강도는 `low`입니다. CLI에서도 모델을 생략하면 같은 기본값을 사용하며 `--model`로 명시한 모델은 유지합니다.
 

@@ -96,7 +96,6 @@ def validate_answer(raw: str, blocks: list[dict]) -> dict:
 
 
 def ask(path: Path, request: dict) -> dict:
-    from openai_codex import ApprovalMode, Codex, CodexConfig, LocalImageInput, Sandbox, TextInput
     question = request.get("question", "").strip()
     if not question or len(question) > 8000:
         raise ValueError("질문은 1~8,000자 이내로 입력해 주세요.")
@@ -113,10 +112,6 @@ def ask(path: Path, request: dict) -> dict:
     # Images retain equations and charts which the PDF text layer cannot represent.
     tokens = set(re.findall(r"\w{2,}", question.lower()))
     visuals = sorted([b for b in blocks if b["images"]], key=lambda b: sum(t in (b["text"] + b["korean"]).lower() for t in tokens), reverse=True)[:12]
-    inputs = [TextInput(prompt)]
-    for block in visuals:
-        for image in block["images"][:1]:
-            inputs.extend([TextInput("Paper image for evidence id: " + block["id"]), LocalImageInput(image)])
     instructions = (
         "You answer questions about the supplied academic paper in Korean, using Markdown. "
         "Use ONLY the supplied paper text and images as evidence; distinguish author's claims from your inference. "
@@ -126,6 +121,25 @@ def ask(path: Path, request: dict) -> dict:
         "Cite the supplied block ids supporting your answer in citations. Give no citations for facts absent from the paper. "
         "Write equations in readable plain-text Unicode notation and explain symbols. Do not emit raw LaTeX delimiters or commands because the chat supports Markdown without a math renderer. Return the requested JSON schema."
     )
+    if request.get("provider") == "chatgpt":
+        import base64
+        import mimetypes
+        import chatgpt_auth
+        content = [{"type": "input_text", "text": prompt}]
+        for block in visuals:
+            for image in block["images"][:1]:
+                mime = mimetypes.guess_type(image)[0] or "image/png"
+                data = base64.b64encode(Path(image).read_bytes()).decode()
+                content.extend([{"type": "input_text", "text": "Paper image for evidence id: " + block["id"]},
+                                {"type": "input_image", "image_url": f"data:{mime};base64,{data}"}])
+        raw, _ = chatgpt_auth.request_json(request.get("model") or chatgpt_auth.DEFAULT_MODEL,
+            instructions, [{"role": "user", "content": content}], ANSWER_SCHEMA)
+        return validate_answer(raw, blocks)
+    from openai_codex import ApprovalMode, Codex, CodexConfig, LocalImageInput, Sandbox, TextInput
+    inputs = [TextInput(prompt)]
+    for block in visuals:
+        for image in block["images"][:1]:
+            inputs.extend([TextInput("Paper image for evidence id: " + block["id"]), LocalImageInput(image)])
     # An isolated cwd prevents repository instructions influencing paper answers.
     with tempfile.TemporaryDirectory(prefix="kpaper-qa-") as cwd:
         with Codex(CodexConfig(cwd=cwd, config_overrides=('web_search="disabled"', 'features.shell_tool=false'))) as codex:
