@@ -223,6 +223,10 @@ HTML 응답은 논문 본문(`ltx_document`와 본문 문단)이 있을 때만 �
 
 기본 `auto` 백엔드는 `pdf-inspector`로 페이지를 분류합니다. Unlimited-OCR은 디지털 페이지에서도 그림·표·차트·수식 영역과 읽기 순서를 분석합니다. 원문 텍스트가 있는 페이지는 PDF에서 직접 추출한 본문을 우선 사용하고, Unlimited-OCR이 찾은 시각 자료 영역과 결합합니다. OCR이 필요한 페이지는 모델이 추출한 본문과 레이아웃을 사용합니다. 시각 자료는 원본 영역을 잘라 본문 사이에 배치합니다. `--layout-backend native`와 `--layout-backend unlimited-ocr-mlx`는 특정 경로를 강제할 때 사용합니다.
 
+이미지는 한 페이지씩 생성하고, 일반 텍스트만 있는 디지털 페이지는 모델을 생략합니다. 스캔·그림·벡터 도형·수식 페이지는 grounded 분석을 유지합니다. 모델의 이미지 조각과 SAM attention은 메모리를 제한하며 계산하고, 같은 사용자의 KPaper OCR은 한 번에 하나씩 실행합니다. 완료된 결과는 `inputs/assets/<paper-id>/layout/cache/`에 이미지·모델 버전·토큰 설정별로 저장해 재시도에서 재사용합니다. 분석 종료·오류 시 모델과 Metal 캐시를 해제합니다. `--json`의 `native_only_pages`, `ocr_runtime`에서 모델 생략 페이지, 생성·캐시 재사용 페이지 수와 MLX 최대 메모리를 확인할 수 있습니다.
+
+최적화 측정과 Swift·GGUF·4bit 대안의 비교는 [OCR 메모리 최적화](docs/OCR_OPTIMIZATION.md)를 참고하세요.
+
 ### 결과 파일과 스타일 갱신
 
 생성하는 리더는 **`outputs/<논문 제목 기반 파일명>.ko-en.paper.html` 하나**입니다. 제목을 파일명으로 정규화하며, 제목을 사용할 수 없는 경우 논문 ID를 사용합니다. 같은 파일에서 한국어 보기와 한영 비교를 전환합니다.

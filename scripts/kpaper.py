@@ -388,22 +388,23 @@ def extract_image_layout_with_fallback(
         return blocks, raw_layout, ""
     except RuntimeError as exc:
         fallback_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
+        if (not any(block.text.strip() for block in fallback_blocks if not pdf_layout.is_visual_block(block))
+                and not pdf_layout.is_blank_pdf_page(pdf_path, page_index)):
+            raise RuntimeError(f"PDF page {page_index + 1}: OCR failed and no native text is available: {exc}") from exc
         return fallback_blocks, "", str(exc)
 
 
-def write_liteparse_screenshots(
-    shots: list[Any],
-    assets_dir: Path,
-) -> list[Path]:
-    assets_dir.mkdir(parents=True, exist_ok=True)
-    image_paths: list[Path] = []
-    for shot in sorted(shots, key=lambda item: getattr(item, "page_num", 0)):
-        page_num = getattr(shot, "page_num", len(image_paths) + 1)
-        image_name = f"page-{page_num:04d}.png"
-        image_path = assets_dir / image_name
-        image_path.write_bytes(getattr(shot, "image_bytes"))
-        image_paths.append(image_path)
-    return image_paths
+def iter_pdf_page_images(pdf_path: Path, assets_dir: Path, dpi: int, max_pages: int):
+    """Render in native PyMuPDF code, retaining just one page raster at a time."""
+    import pymupdf
+    with pymupdf.open(pdf_path) as document:
+        count = min(len(document), max_pages) if max_pages > 0 else len(document)
+        for index in range(count):
+            path = assets_dir / f"page-{index + 1:04d}.png"
+            pixmap = document[index].get_pixmap(dpi=dpi, alpha=False)
+            pixmap.save(path)
+            del pixmap
+            yield index, path
 
 
 def pdf_to_source_html(
@@ -477,19 +478,22 @@ def pdf_to_source_html(
     table_blocks = 0
     formula_blocks = 0
     layout_fallbacks: list[dict[str, Any]] = []
-    layout_engine = (
-        pdf_layout.UnlimitedOCRMLX(model_id=layout_model, max_tokens=layout_max_tokens)
-        if layout_backend in {"auto", "unlimited-ocr-mlx"}
-        else None
-    )
-
+    native_only_pages: list[int] = []
     parser = LiteParse(**parser_kwargs)
     parsed = parser.parse(pdf_path)
-    page_numbers = list(range(1, max_pages + 1)) if max_pages > 0 else None
-    shots = parser.screenshot(pdf_path, page_numbers=page_numbers)
     pages = getattr(parsed, "pages", [])
-    image_paths = write_liteparse_screenshots(shots, assets_dir)
-    selected_pages = max(len(pages), len(image_paths))
+    import pymupdf
+    with pymupdf.open(pdf_path) as document:
+        selected_pages = min(len(document), max_pages) if max_pages > 0 else len(document)
+    image_paths: list[Path] = []
+    layout_engine = (
+        pdf_layout.UnlimitedOCRMLX(
+            model_id=layout_model, max_tokens=layout_max_tokens,
+            cache_dir=assets_dir / "layout" / "cache",
+            status=lambda label: emit_progress(progress_enabled, "layout", len(image_paths) - 1,
+                                                selected_pages, label),
+        ) if layout_backend in {"auto", "unlimited-ocr-mlx"} else None
+    )
     emit_progress(
         progress_enabled,
         "layout",
@@ -499,135 +503,146 @@ def pdf_to_source_html(
         effective_layout_backend,
     )
 
-    for page_index in range(selected_pages):
-        page = pages[page_index] if page_index < len(pages) else {}
-        page_image = image_paths[page_index] if page_index < len(image_paths) else None
-        if layout_backend != "liteparse" and page_image is not None:
-            use_mlx_layout = layout_backend in {"auto", "unlimited-ocr-mlx"}
-            if use_mlx_layout and layout_engine is not None:
-                grounded_blocks, raw_layout, fallback_reason = extract_image_layout_with_fallback(
-                    pdf_path, page_index, page_image, layout_engine
+    try:
+        for page_index, page_image in iter_pdf_page_images(pdf_path, assets_dir, image_dpi, max_pages):
+            image_paths.append(page_image)
+            page = pages[page_index] if page_index < len(pages) else {}
+            if layout_backend != "liteparse" and page_image is not None:
+                use_mlx_layout = layout_backend == "unlimited-ocr-mlx" or (
+                    layout_backend == "auto" and (
+                        page_index in ocr_page_indices
+                        or pdf_layout.page_requires_grounding(pdf_path, page_index)
+                    )
                 )
-                if fallback_reason:
-                    layout_fallbacks.append(
-                        {
-                            "page": page_index + 1,
-                            "from": "unlimited-ocr-mlx",
-                            "to": "native" if layout_blocks else "liteparse",
-                            "reason": fallback_reason,
-                        }
+                if layout_backend == "auto" and not use_mlx_layout:
+                    native_only_pages.append(page_index + 1)
+                if use_mlx_layout and layout_engine is not None:
+                    grounded_blocks, raw_layout, fallback_reason = extract_image_layout_with_fallback(
+                        pdf_path, page_index, page_image, layout_engine
                     )
-                grounded_blocks = [
-                    block
-                    for block in grounded_blocks
-                    if not pdf_layout.is_page_number_block(block)
-                    and not (
-                        page_index > 0
-                        and pdf_layout.is_heading_block(block)
-                        and block.bbox[1] < 85
-                    )
-                ]
-                if layout_backend == "auto" and page_index not in ocr_page_indices and not fallback_reason:
-                    native_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
-                    layout_blocks = pdf_layout.combine_native_text_with_grounded_visuals(
-                        native_blocks, grounded_blocks
-                    )
-                elif layout_backend == "auto" and page_index not in ocr_page_indices:
-                    layout_blocks = [
-                        block for block in grounded_blocks if not pdf_layout.is_visual_block(block)
+                    if fallback_reason:
+                        layout_fallbacks.append(
+                            {
+                                "page": page_index + 1,
+                                "from": "unlimited-ocr-mlx",
+                                "to": "native" if grounded_blocks else "liteparse",
+                                "reason": fallback_reason,
+                            }
+                        )
+                    grounded_blocks = [
+                        block
+                        for block in grounded_blocks
+                        if not pdf_layout.is_page_number_block(block)
+                        and not (
+                            page_index > 0
+                            and pdf_layout.is_heading_block(block)
+                            and block.bbox[1] < 85
+                        )
                     ]
+                    if layout_backend == "auto" and page_index not in ocr_page_indices and not fallback_reason:
+                        native_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
+                        layout_blocks = pdf_layout.combine_native_text_with_grounded_visuals(
+                            native_blocks, grounded_blocks
+                        )
+                    elif layout_backend == "auto" and page_index not in ocr_page_indices:
+                        layout_blocks = [
+                            block for block in grounded_blocks if not pdf_layout.is_visual_block(block)
+                        ]
+                    else:
+                        layout_blocks = grounded_blocks
                 else:
-                    layout_blocks = grounded_blocks
-            else:
-                layout_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
-                raw_layout = ""
-            if layout_blocks:
-                table_blocks += sum(1 for block in layout_blocks if "table" in block.kind)
-                figure_blocks += sum(
-                    1
-                    for block in layout_blocks
-                    if pdf_layout.is_visual_block(block) and "table" not in block.kind
-                    and not pdf_layout.kind_contains(block.kind, {"equation", "formula", "math"})
-                )
-                formula_blocks += sum(
-                    1
-                    for block in layout_blocks
-                    if any(part in block.kind for part in ("formula", "equation", "math"))
-                )
-                page_html, page_visuals = pdf_layout.render_layout_page(
-                    layout_blocks,
-                    page_image=page_image,
-                    assets_dir=assets_dir,
-                    html_parent=html_path.parent,
-                    paper_id=paper_id,
-                    page_num=page_index + 1,
-                )
-                if raw_layout:
-                    raw_layout_path = assets_dir / "layout" / f"page-{page_index + 1:04d}.grounding.txt"
-                    raw_layout_path.parent.mkdir(parents=True, exist_ok=True)
-                    raw_layout_path.write_text(raw_layout, encoding="utf-8")
-                text_blocks += sum(1 for block in layout_blocks if not pdf_layout.is_visual_block(block))
-                visual_blocks += page_visuals
+                    layout_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
+                    raw_layout = ""
+                if layout_blocks:
+                    table_blocks += sum(1 for block in layout_blocks if "table" in block.kind)
+                    figure_blocks += sum(
+                        1
+                        for block in layout_blocks
+                        if pdf_layout.is_visual_block(block) and "table" not in block.kind
+                        and not pdf_layout.kind_contains(block.kind, {"equation", "formula", "math"})
+                    )
+                    formula_blocks += sum(
+                        1
+                        for block in layout_blocks
+                        if any(part in block.kind for part in ("formula", "equation", "math"))
+                    )
+                    page_html, page_visuals = pdf_layout.render_layout_page(
+                        layout_blocks,
+                        page_image=page_image,
+                        assets_dir=assets_dir,
+                        html_parent=html_path.parent,
+                        paper_id=paper_id,
+                        page_num=page_index + 1,
+                    )
+                    if raw_layout:
+                        raw_layout_path = assets_dir / "layout" / f"page-{page_index + 1:04d}.grounding.txt"
+                        raw_layout_path.parent.mkdir(parents=True, exist_ok=True)
+                        raw_layout_path.write_text(raw_layout, encoding="utf-8")
+                    text_blocks += sum(1 for block in layout_blocks if not pdf_layout.is_visual_block(block))
+                    visual_blocks += page_visuals
+                else:
+                    paragraphs = text_blocks_from_liteparse_page(page)
+                    text_blocks += len(paragraphs)
+                    image_src = pdf_layout.relative_asset_src(page_image, html_path.parent)
+                    paragraph_html = "\n".join(
+                        f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
+                        for idx, text in enumerate(paragraphs)
+                    )
+                    page_html = (
+                        f'<figure class="ltx_figure codex_pdf_page_image">'
+                        f'<img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">'
+                        f'</figure>\n{paragraph_html}'
+                    )
             else:
                 paragraphs = text_blocks_from_liteparse_page(page)
                 text_blocks += len(paragraphs)
-                image_src = pdf_layout.relative_asset_src(page_image, html_path.parent)
+                image_src = pdf_layout.relative_asset_src(page_image, html_path.parent) if page_image else ""
                 paragraph_html = "\n".join(
                     f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
                     for idx, text in enumerate(paragraphs)
                 )
-                page_html = (
-                    f'<figure class="ltx_figure codex_pdf_page_image">'
-                    f'<img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">'
-                    f'</figure>\n{paragraph_html}'
+                figure_html = (
+                    f"""
+      <figure class="ltx_figure codex_pdf_page_image">
+        <img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">
+      </figure>
+    """.rstrip()
+                    if image_src
+                    else ""
                 )
-        else:
-            paragraphs = text_blocks_from_liteparse_page(page)
-            text_blocks += len(paragraphs)
-            image_src = pdf_layout.relative_asset_src(page_image, html_path.parent) if page_image else ""
-            paragraph_html = "\n".join(
-                f'<div class="ltx_para" id="p{page_index + 1}-{idx + 1}"><p class="ltx_p">{html.escape(text)}</p></div>'
-                for idx, text in enumerate(paragraphs)
-            )
-            figure_html = (
-                f"""
-  <figure class="ltx_figure codex_pdf_page_image">
-    <img class="ltx_graphics" src="{html.escape(image_src)}" alt="PDF page {page_index + 1}">
-  </figure>
-""".rstrip()
-                if image_src
+                page_html = f"{figure_html}\n{paragraph_html}"
+            page_label_html = (
+                f'<h2 class="ltx_title ltx_title_section">Page {page_index + 1}</h2>'
+                if layout_backend == "liteparse"
                 else ""
             )
-            page_html = f"{figure_html}\n{paragraph_html}"
-        page_label_html = (
-            f'<h2 class="ltx_title ltx_title_section">Page {page_index + 1}</h2>'
-            if layout_backend == "liteparse"
-            else ""
-        )
-        page_sections.append(
-            f"""
-<section class="ltx_section codex_pdf_page" id="page-{page_index + 1}">
-  {page_label_html}
-  {page_html}
-</section>
-""".strip()
-        )
-        if layout_backend == "liteparse":
-            page_backend = "LiteParse"
-        elif layout_backend == "unlimited-ocr-mlx" or page_index in ocr_page_indices:
-            page_backend = "Unlimited-OCR"
-        elif layout_backend == "auto":
-            page_backend = "원문 텍스트 + 원본 그림"
-        else:
-            page_backend = "원문 텍스트"
-        emit_progress(
-            progress_enabled,
-            "layout",
-            page_index + 1,
-            selected_pages,
-            f"페이지 {page_index + 1}/{selected_pages} 분석",
-            page_backend,
-        )
+            page_sections.append(
+                f"""
+    <section class="ltx_section codex_pdf_page" id="page-{page_index + 1}">
+      {page_label_html}
+      {page_html}
+    </section>
+    """.strip()
+            )
+            if layout_backend == "liteparse":
+                page_backend = "LiteParse"
+            elif layout_backend == "unlimited-ocr-mlx" or page_index in ocr_page_indices:
+                page_backend = "Unlimited-OCR"
+            elif layout_backend == "auto":
+                page_backend = "원문 텍스트 + 원본 그림"
+            else:
+                page_backend = "원문 텍스트"
+            emit_progress(
+                progress_enabled,
+                "layout",
+                page_index + 1,
+                selected_pages,
+                f"페이지 {page_index + 1}/{selected_pages} 분석",
+                page_backend,
+            )
+    finally:
+        if layout_engine is not None:
+            layout_engine.close()
 
     structure_summary = f"그림 {figure_blocks}개 · 표 {table_blocks}개 · 수식 {formula_blocks}개"
     emit_progress(
@@ -677,6 +692,8 @@ def pdf_to_source_html(
         "pdf_classification": classification,
         "layout_model": layout_model if layout_engine is not None else "",
         "layout_fallbacks": layout_fallbacks,
+        "native_only_pages": native_only_pages,
+        "ocr_runtime": layout_engine.stats if layout_engine is not None else None,
     }
 
 

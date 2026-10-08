@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import html
+import gc
+import hashlib
 import json
 import os
 import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 DEFAULT_LAYOUT_MODEL = "sahilchachra/unlimited-ocr-mxfp8-mlx"
@@ -308,6 +310,37 @@ def extract_native_pdf_layout(pdf_path: Path, page_index: int) -> list[LayoutBlo
     return order_layout_blocks(visible_text + visuals)
 
 
+def page_requires_grounding(pdf_path: Path, page_index: int) -> bool:
+    """Skip VLM work only on clearly ordinary, selectable text pages.
+
+    Be conservative about vector figures and math. Native geometry alone can
+    split those into fragments, so they still need the complete grounded crop.
+    """
+    import pymupdf
+    with pymupdf.open(pdf_path) as document:
+        page = document[page_index]
+        if page.get_images() or page.get_drawings():
+            return True
+        text = page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)
+        spans = [span for block in text["blocks"] for line in block.get("lines", [])
+                 for span in line.get("spans", [])]
+        if sum(len(span.get("text", "").strip()) for span in spans) < 40:
+            return True
+        for span in spans:
+            if (span.get("flags", 0) & 1
+                    or re.search(r"math|symbol|cmsy|cmmi|cmex|msbm|stix|mtmi", span.get("font", ""), re.I)
+                    or re.search(r"[\u0370-\u03ff\u2070-\u209f\u2200-\u22ff]", span.get("text", ""))):
+                return True
+        return False
+
+
+def is_blank_pdf_page(pdf_path: Path, page_index: int) -> bool:
+    import pymupdf
+    with pymupdf.open(pdf_path) as document:
+        page = document[page_index]
+        return not (page.get_text().strip() or page.get_images() or page.get_drawings())
+
+
 def render_layout_page(
     blocks: list[LayoutBlock],
     page_image: Path,
@@ -366,21 +399,88 @@ def render_layout_page(
 
 
 class UnlimitedOCRMLX:
-    def __init__(self, model_id: str = DEFAULT_LAYOUT_MODEL, max_tokens: int = 8192) -> None:
+    def __init__(
+        self, model_id: str = DEFAULT_LAYOUT_MODEL, max_tokens: int = 8192,
+        cache_dir: Path | None = None, status: Callable[[str], None] | None = None,
+    ) -> None:
+        self.model_id = model_id
+        self.max_tokens = max_tokens
+        self.cache_dir = cache_dir
+        self.status = status
+        self._model = self._processor = self._mx = None
+        self._lock = None
+        self._old_cache_limit = None
+        self._model_overlay: tempfile.TemporaryDirectory[str] | None = None
+        self.stats = {"generated_pages": 0, "cache_hits": 0, "peak_mlx_bytes": 0}
+
+    def _ensure_loaded(self) -> None:
+        if self._model is not None:
+            return
+        from ocr_runtime import MLX_CACHE_BYTES, OCRProcessLock, serialize_vision_encoders
+        self._lock = OCRProcessLock(self.status)
+        self._lock.acquire()
         try:
+            if self.status:
+                self.status("OCR 모델 준비 중")
+            import mlx.core as mx
+            import mlx.nn as nn
             from mlx_vlm import generate, load
             from mlx_vlm.prompt_utils import apply_chat_template
+            self._mx = mx
+            self._old_cache_limit = mx.set_cache_limit(MLX_CACHE_BYTES)
+            mx.reset_peak_memory()
+            self._generate = generate
+            self._apply_chat_template = apply_chat_template
+            model_path = self._compatible_model_path(self.model_id)
+            self._model, self._processor = load(str(model_path))
+            serialize_vision_encoders(self._model, mx, nn)
+            mx.eval(self._model.parameters())
+            mx.clear_cache()
+            self.stats["peak_mlx_bytes"] = mx.get_peak_memory()
         except ModuleNotFoundError as exc:
+            self.close()
             raise RuntimeError(
                 "Unlimited-OCR MLX layout detection requires mlx-vlm; install project dependencies with: uv sync"
             ) from exc
-        self._generate = generate
-        self._apply_chat_template = apply_chat_template
-        self._model_overlay: tempfile.TemporaryDirectory[str] | None = None
-        model_path = self._compatible_model_path(model_id)
-        self._model, self._processor = load(str(model_path))
-        self.model_id = model_id
-        self.max_tokens = max_tokens
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Release model weights and Metal allocations before translation starts."""
+        self._model = self._processor = None
+        try:
+            if self._mx is not None:
+                gc.collect()
+                self._mx.synchronize()
+                self._mx.clear_cache()
+                if self._old_cache_limit is not None:
+                    self._mx.set_cache_limit(self._old_cache_limit)
+                    self._old_cache_limit = None
+            if self._model_overlay is not None:
+                self._model_overlay.cleanup()
+                self._model_overlay = None
+        finally:
+            if self._lock is not None:
+                self._lock.release()
+                self._lock = None
+
+    def _cache_path(self, image_path: Path) -> Path | None:
+        if self.cache_dir is None:
+            return None
+        # Include the locally cached HF revision (or local model file metadata)
+        # so a model update cannot silently reuse old grounding results.
+        source = Path(self.model_id)
+        if not source.exists():
+            from huggingface_hub import try_to_load_from_cache
+            config = try_to_load_from_cache(self.model_id, "config.json")
+            source = Path(config).parent if isinstance(config, str) else source
+        signature = [(item.name, item.stat().st_size, item.stat().st_mtime_ns)
+                     for item in sorted(source.glob("*")) if item.is_file()]
+        identity = json.dumps(["serial-vision-v2", self.model_id, str(source), signature,
+                               self.max_tokens, DEFAULT_LAYOUT_INSTRUCTION]).encode()
+        digest = hashlib.sha256(identity + image_path.read_bytes()).hexdigest()
+        return self.cache_dir / f"{digest}.json"
 
     def _compatible_model_path(self, model_id: str) -> Path:
         """Route patched quantizations through mlx-vlm's current Unlimited-OCR implementation."""
@@ -426,14 +526,9 @@ class UnlimitedOCRMLX:
         return overlay
 
     def parse_image(self, image_path: Path) -> tuple[list[LayoutBlock], str]:
-        prompt = self._apply_chat_template(
-            self._processor,
-            self._model.config,
-            DEFAULT_LAYOUT_INSTRUCTION,
-            num_images=1,
-        )
         model_image_path = image_path
         normalized_image_dir: tempfile.TemporaryDirectory[str] | None = None
+        response = None
         try:
             from PIL import Image
 
@@ -449,6 +544,26 @@ class UnlimitedOCRMLX:
                         Image.Resampling.LANCZOS,
                     )
                     normalized.save(model_image_path, format="PNG")
+                    normalized.close()
+
+            cache_path = self._cache_path(model_image_path)
+            if cache_path is not None and cache_path.is_file():
+                try:
+                    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                    raw_output = cached["text"]
+                    if not isinstance(raw_output, str):
+                        raise ValueError("invalid cached OCR text")
+                    blocks = parse_grounded_layout(raw_output)
+                    if blocks:
+                        self.stats["cache_hits"] += 1
+                        return blocks, raw_output
+                except (OSError, ValueError, KeyError, TypeError):
+                    pass
+
+            self._ensure_loaded()
+            prompt = self._apply_chat_template(
+                self._processor, self._model.config, DEFAULT_LAYOUT_INSTRUCTION, num_images=1,
+            )
 
             response: Any = self._generate(
                 self._model,
@@ -456,15 +571,38 @@ class UnlimitedOCRMLX:
                 prompt=prompt,
                 image=[str(model_image_path)],
                 max_tokens=self.max_tokens,
+                prefill_step_size=512,
                 verbose=False,
             )
+            raw_output = getattr(response, "text", response)
+            if not isinstance(raw_output, str):
+                raw_output = str(raw_output)
+            blocks = parse_grounded_layout(raw_output)
+            if not blocks:
+                raise RuntimeError("Unlimited-OCR returned no grounded layout blocks")
+            if getattr(response, "generation_tokens", 0) >= self.max_tokens:
+                raise RuntimeError("Unlimited-OCR reached --layout-max-tokens before completing the page")
+            self.stats["generated_pages"] += 1
+            # Resolve the cache key again after a first model download.
+            cache_path = self._cache_path(model_image_path)
+            if cache_path is not None:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=cache_path.parent,
+                                                 prefix=".layout-", suffix=".tmp", delete=False) as handle:
+                    temporary_path = Path(handle.name)
+                    json.dump({"text": raw_output}, handle, ensure_ascii=False)
+                try:
+                    os.replace(temporary_path, cache_path)
+                finally:
+                    temporary_path.unlink(missing_ok=True)
+            return blocks, raw_output
         finally:
+            response = None
+            if self._mx is not None:
+                self.stats["peak_mlx_bytes"] = max(
+                    self.stats["peak_mlx_bytes"], self._mx.get_peak_memory(),
+                )
+                gc.collect()
+                self._mx.clear_cache()
             if normalized_image_dir is not None:
                 normalized_image_dir.cleanup()
-        raw_output = getattr(response, "text", response)
-        if not isinstance(raw_output, str):
-            raw_output = str(raw_output)
-        blocks = parse_grounded_layout(raw_output)
-        if not blocks:
-            raise RuntimeError("Unlimited-OCR returned no grounded layout blocks")
-        return blocks, raw_output
