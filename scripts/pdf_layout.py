@@ -12,8 +12,23 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 
-DEFAULT_LAYOUT_MODEL = "sahilchachra/unlimited-ocr-mxfp8-mlx"
+# v2 is the default family. Its decoder is SR-SWA (DASH), which mlx-vlm does not
+# implement; v1 remains the runnable MLX model. See uses_sr_swa / LayoutModelUnavailable.
+LAYOUT_MODEL_V2 = "baidu/Unlimited-OCR-2"
+LAYOUT_MODEL_V1 = "sahilchachra/unlimited-ocr-mxfp8-mlx"
+LAYOUT_MODELS = {"2": LAYOUT_MODEL_V2, "1": LAYOUT_MODEL_V1}
+DEFAULT_LAYOUT_MODEL_VERSION = "2"
+DEFAULT_LAYOUT_MODEL = LAYOUT_MODEL_V2
 DEFAULT_LAYOUT_INSTRUCTION = "<|grounding|>Convert the document to markdown."
+SR_SWA_UNAVAILABLE = (
+    "Unlimited-OCR-2 cannot run on the MLX runtime. Its decoder uses Sparse Reference "
+    "Sliding Window Attention (SR-SWA / DASH: 1.5-entmax block router, page-2D RoPE, and a "
+    "learned indexer). mlx-vlm's unlimited-ocr implements v1 R-SWA only (a ring of decode "
+    "tokens on top of the full prefill). Loading these v2 weights there would ignore "
+    "dash_router and indexer parameters and attend with the wrong pattern. No MLX conversion "
+    "of baidu/Unlimited-OCR-2 was published on Hugging Face as of 2026-10-27. "
+    "Use --layout-model-version 1 for the existing Unlimited-OCR MLX model."
+)
 # Grounding boxes use 0–1000 coordinates, independent of the vision input size.
 LAYOUT_COORDINATE_SIZE = 1000
 MODEL_INPUT_MAX_EDGE = 1600
@@ -54,6 +69,52 @@ VISUAL_KIND_PARTS = {
 HEADING_KIND_PARTS = {"header", "heading", "section", "title"}
 CAPTION_KIND_PARTS = {"caption", "footnote"}
 PAGE_NUMBER_KINDS = {"page-number", "page-num", "pagenumber"}
+
+
+class LayoutModelUnavailable(Exception):
+    """The selected OCR weights cannot be executed by the current runtime."""
+
+
+def normalize_layout_model_version(version: str | None) -> str:
+    text = str(version or "").strip().lower().lstrip("v")
+    if text in {"2", "1"}:
+        return text
+    raise ValueError("layout model version must be 2 or 1")
+
+
+def uses_sr_swa(model_id: str) -> bool:
+    """True when the checkpoint is Unlimited-OCR-2's sparse decoder, not v1 R-SWA."""
+    name = model_id.rstrip("/").split("/")[-1]
+    if name == "Unlimited-OCR-2":
+        return True
+    config_path = Path(model_id) / "config.json"
+    if not config_path.is_file():
+        return False
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    sparse = config.get("sparse_attention_config")
+    return isinstance(sparse, dict) and bool(sparse.get("use_sparse_attention"))
+
+
+def resolve_layout_model(version: str | None = None, model_id: str = "") -> tuple[str, str]:
+    """Return (version, model id).
+
+    Omitting both selects Unlimited-OCR-2. An explicit non-v2 id keeps the v1 MLX
+    runtime unless the caller also forces version 2. SR-SWA weights are always
+    version 2, including when version 1 was requested.
+    """
+    model_id = (model_id or "").strip()
+    if version is None or str(version).strip() == "":
+        version = "2" if not model_id or uses_sr_swa(model_id) else "1"
+    else:
+        version = normalize_layout_model_version(version)
+    if not model_id:
+        model_id = LAYOUT_MODELS[version]
+    if uses_sr_swa(model_id):
+        version = "2"
+    return version, model_id
 
 
 def normalize_kind(value: str) -> str:
@@ -400,10 +461,11 @@ def render_layout_page(
 
 class UnlimitedOCRMLX:
     def __init__(
-        self, model_id: str = DEFAULT_LAYOUT_MODEL, max_tokens: int = 8192,
+        self, model_id: str = "", max_tokens: int = 8192,
         cache_dir: Path | None = None, status: Callable[[str], None] | None = None,
+        model_version: str | None = None,
     ) -> None:
-        self.model_id = model_id
+        self.model_version, self.model_id = resolve_layout_model(model_version, model_id)
         self.max_tokens = max_tokens
         self.cache_dir = cache_dir
         self.status = status
@@ -416,6 +478,8 @@ class UnlimitedOCRMLX:
     def _ensure_loaded(self) -> None:
         if self._model is not None:
             return
+        if self.model_version == "2" or uses_sr_swa(self.model_id):
+            raise LayoutModelUnavailable(SR_SWA_UNAVAILABLE)
         from ocr_runtime import MLX_CACHE_BYTES, OCRProcessLock, serialize_vision_encoders
         self._lock = OCRProcessLock(self.status)
         self._lock.acquire()
@@ -477,8 +541,15 @@ class UnlimitedOCRMLX:
             source = Path(config).parent if isinstance(config, str) else source
         signature = [(item.name, item.stat().st_size, item.stat().st_mtime_ns)
                      for item in sorted(source.glob("*")) if item.is_file()]
-        identity = json.dumps(["serial-vision-v2", self.model_id, str(source), signature,
-                               self.max_tokens, DEFAULT_LAYOUT_INSTRUCTION]).encode()
+        identity = json.dumps([
+            "serial-vision-v2",
+            f"unlimited-ocr-{self.model_version}",
+            self.model_id,
+            str(source),
+            signature,
+            self.max_tokens,
+            DEFAULT_LAYOUT_INSTRUCTION,
+        ]).encode()
         digest = hashlib.sha256(identity + image_path.read_bytes()).hexdigest()
         return self.cache_dir / f"{digest}.json"
 

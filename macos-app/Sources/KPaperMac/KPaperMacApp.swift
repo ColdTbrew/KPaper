@@ -941,7 +941,15 @@ struct WorkspaceView: View {
                     SettingRow(title: "PDF 레이아웃") {
                         VStack(alignment: .leading, spacing: 5) {
                             Toggle("표·차트·그림을 본문 위치에 삽입", isOn: $model.useAdvancedPDFLayout)
-                            Text("디지털 PDF는 원문 추출 · 필요한 페이지만 Unlimited-OCR")
+                            Picker("OCR 모델", selection: $model.layoutModelVersion) {
+                                Text("Unlimited-OCR 2").tag("2")
+                                Text("Unlimited-OCR 1 (MLX)").tag("1")
+                            }
+                            .pickerStyle(.segmented)
+                            .disabled(!model.useAdvancedPDFLayout)
+                            Text(model.layoutModelVersion == "1"
+                                 ? "v1 R-SWA · MLX로 로컬 OCR을 실행합니다."
+                                 : "기본값. SR-SWA는 아직 MLX에서 실행되지 않습니다.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(WorkspacePalette.secondaryText)
                         }
@@ -1792,6 +1800,7 @@ struct RuntimeSettings {
     let model: String
     let provider: TranslationProvider
     let useAdvancedPDFLayout: Bool
+    let layoutModelVersion: String
 }
 
 struct ModelOption {
@@ -1837,6 +1846,7 @@ final class TranslatorModel: ObservableObject {
     }
     @Published var selectedProvider: TranslationProvider
     @Published var useAdvancedPDFLayout: Bool
+    @Published var layoutModelVersion: String
     @Published var codexAuthStatus = "상태를 확인해주세요"
     @Published var isCodexAuthenticated = false
     @Published var clipboardPreview = ""
@@ -1891,6 +1901,8 @@ final class TranslatorModel: ObservableObject {
         selectedChatGPTModel = defaults.string(forKey: "selectedChatGPTModel") ?? Self.defaultCodexModel
         selectedProvider = TranslationProvider(rawValue: defaults.string(forKey: "selectedProvider") ?? "") ?? .chatgpt
         useAdvancedPDFLayout = defaults.object(forKey: "useAdvancedPDFLayout") as? Bool ?? true
+        let storedLayoutVersion = defaults.string(forKey: "layoutModelVersion") ?? "2"
+        layoutModelVersion = storedLayoutVersion == "1" ? "1" : "2"
         if let saved = defaults.data(forKey: "recentDocuments"), let history = try? JSONDecoder().decode([RecentDocument].self, from: saved) {
             recentDocuments = history.sorted { $0.openedAt > $1.openedAt }
         }
@@ -1907,6 +1919,7 @@ final class TranslatorModel: ObservableObject {
         defaults.set(selectedChatGPTModel, forKey: "selectedChatGPTModel")
         defaults.set(selectedProvider.rawValue, forKey: "selectedProvider")
         defaults.set(useAdvancedPDFLayout, forKey: "useAdvancedPDFLayout")
+        defaults.set(layoutModelVersion, forKey: "layoutModelVersion")
         appendLog("settings saved")
     }
 
@@ -1978,7 +1991,7 @@ final class TranslatorModel: ObservableObject {
         if settings.useAdvancedPDFLayout {
             return [
                 "--layout-backend", "auto",
-                "--layout-model", "sahilchachra/unlimited-ocr-mxfp8-mlx"
+                "--layout-model-version", settings.layoutModelVersion
             ]
         }
         return ["--layout-backend", "liteparse"]
@@ -2150,7 +2163,8 @@ final class TranslatorModel: ObservableObject {
             apiKeyOverride: apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines),
             model: activeModel.trimmingCharacters(in: .whitespacesAndNewlines),
             provider: selectedProvider,
-            useAdvancedPDFLayout: useAdvancedPDFLayout
+            useAdvancedPDFLayout: useAdvancedPDFLayout,
+            layoutModelVersion: layoutModelVersion
         )
     }
 

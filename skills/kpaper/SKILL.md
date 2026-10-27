@@ -82,6 +82,7 @@ Notes:
 - Agents may add the LiteParse skill instructions with `npx skills add run-llama/llamaparse-agent-skills --skill liteparse`.
 - Hugging Face `/blob/...` PDF URLs are normalized to `/resolve/...`.
 - PDF import preserves page screenshots and extracts text blocks with LiteParse; it is less structure-rich than ar5iv HTML.
+- The default OCR family is Unlimited-OCR-2. It does not run on the MLX runtime (SR-SWA is not implemented there). Pass `--layout-model-version 1` to use Unlimited-OCR MLX.
 
 One-paper dry run:
 
