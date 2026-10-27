@@ -123,6 +123,82 @@ class PagePipelineTests(unittest.TestCase):
             self.assertEqual(reason, "no blocks")
 
 
+class LayoutModelSelectionTests(unittest.TestCase):
+    def test_v2_is_the_default_and_v1_is_selectable(self):
+        self.assertEqual(pdf_layout.DEFAULT_LAYOUT_MODEL_VERSION, "2")
+        self.assertEqual(pdf_layout.DEFAULT_LAYOUT_MODEL, "baidu/Unlimited-OCR-2")
+        self.assertEqual(
+            pdf_layout.resolve_layout_model(None, ""),
+            ("2", pdf_layout.LAYOUT_MODEL_V2),
+        )
+        self.assertEqual(
+            pdf_layout.resolve_layout_model("1", ""),
+            ("1", pdf_layout.LAYOUT_MODEL_V1),
+        )
+        self.assertEqual(
+            pdf_layout.resolve_layout_model(None, pdf_layout.LAYOUT_MODEL_V1),
+            ("1", pdf_layout.LAYOUT_MODEL_V1),
+        )
+        self.assertEqual(
+            pdf_layout.resolve_layout_model("1", pdf_layout.LAYOUT_MODEL_V2),
+            ("2", pdf_layout.LAYOUT_MODEL_V2),
+        )
+        parser = kpaper.build_parser()
+        defaults = parser.parse_args(["pdf-import", "--paper-id", "sample", "--dry-run"])
+        self.assertIsNone(defaults.layout_model_version)
+        self.assertEqual(defaults.layout_model, "")
+        v1 = parser.parse_args([
+            "pdf-import", "--paper-id", "sample", "--layout-model-version", "1", "--dry-run",
+        ])
+        self.assertEqual(pdf_layout.resolve_layout_model(v1.layout_model_version, v1.layout_model)[0], "1")
+
+    def test_model_version_is_part_of_the_cache_key(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model"
+            model.mkdir()
+            (model / "config.json").write_text("{}")
+            image = root / "page.png"
+            Image.new("RGB", (32, 32), "white").save(image)
+            v1 = pdf_layout.UnlimitedOCRMLX(str(model), cache_dir=root / "cache", model_version="1")
+            v2 = pdf_layout.UnlimitedOCRMLX(str(model), cache_dir=root / "cache", model_version="2")
+            self.assertEqual(v1.model_version, "1")
+            self.assertEqual(v2.model_version, "2")
+            self.assertNotEqual(v1._cache_path(image), v2._cache_path(image))
+            v1_again = pdf_layout.UnlimitedOCRMLX(str(model), cache_dir=root / "cache", model_version="1")
+            self.assertEqual(v1._cache_path(image), v1_again._cache_path(image))
+
+    def test_v2_refuses_mlx_load_and_is_not_a_native_fallback(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "Unlimited-OCR-2"
+            model.mkdir()
+            (model / "config.json").write_text(json.dumps({
+                "sparse_attention_config": {"use_sparse_attention": True},
+            }))
+            self.assertTrue(pdf_layout.uses_sr_swa(str(model)))
+            engine = pdf_layout.UnlimitedOCRMLX(str(model), model_version="1")
+            self.assertEqual(engine.model_version, "2")
+            with self.assertRaises(pdf_layout.LayoutModelUnavailable):
+                engine._ensure_loaded()
+            self.assertIsNone(engine._model)
+
+            path = root / "paper.pdf"
+            make_pdf(path, 1, figure=True)
+            with self.assertRaises(pdf_layout.LayoutModelUnavailable):
+                kpaper.pdf_to_source_html(
+                    path, root / "paper.html", root / "assets", "paper", "Paper",
+                    72, 1, "auto", str(model), 8192, False, layout_model_version="1",
+                )
+
+            forced = pdf_layout.UnlimitedOCRMLX(
+                pdf_layout.LAYOUT_MODEL_V1, model_version="2",
+            )
+            self.assertEqual(forced.model_version, "2")
+            with self.assertRaises(pdf_layout.LayoutModelUnavailable):
+                forced._ensure_loaded()
+
+
 class LayoutCacheTests(unittest.TestCase):
     def test_valid_cache_avoids_model_load_and_invalidates_changed_image_or_model(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -164,7 +240,16 @@ class LayoutCacheTests(unittest.TestCase):
             self.assertFalse((root / "cache").exists())
 
 
+def _mlx_core_imports() -> bool:
+    try:
+        import mlx.core  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
 class NativeExecutionTests(unittest.TestCase):
+    @unittest.skipUnless(_mlx_core_imports(), "MLX native library is unavailable (needs Apple Silicon / Metal)")
     def test_chunked_attention_matches_upstream_full_attention(self):
         import mlx.core as mx
         import mlx.nn as nn

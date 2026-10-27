@@ -386,6 +386,8 @@ def extract_image_layout_with_fallback(
     try:
         blocks, raw_layout = layout_engine.parse_image(page_image)
         return blocks, raw_layout, ""
+    except pdf_layout.LayoutModelUnavailable:
+        raise
     except RuntimeError as exc:
         fallback_blocks = pdf_layout.extract_native_pdf_layout(pdf_path, page_index)
         if (not any(block.text.strip() for block in fallback_blocks if not pdf_layout.is_visual_block(block))
@@ -420,7 +422,10 @@ def pdf_to_source_html(
     layout_max_tokens: int,
     dry_run: bool,
     progress_enabled: bool = False,
+    layout_model_version: str | None = None,
 ) -> dict[str, Any]:
+    layout_model_version, layout_model = pdf_layout.resolve_layout_model(layout_model_version, layout_model)
+    uses_layout_model = layout_backend in {"auto", "unlimited-ocr-mlx"}
     if dry_run:
         return {
             "status": "dry_run",
@@ -430,7 +435,8 @@ def pdf_to_source_html(
             "image_dpi": image_dpi,
             "max_pages": max_pages,
             "layout_backend": layout_backend,
-            "layout_model": layout_model if layout_backend == "unlimited-ocr-mlx" else "",
+            "layout_model": layout_model if uses_layout_model else "",
+            "layout_model_version": layout_model_version if uses_layout_model else "",
             "parser": "pdf-inspector+liteparse+pymupdf-layout" if layout_backend == "auto" else (
                 "liteparse-python+pymupdf-layout" if layout_backend == "native" else "liteparse-python"
             ),
@@ -492,6 +498,7 @@ def pdf_to_source_html(
             cache_dir=assets_dir / "layout" / "cache",
             status=lambda label: emit_progress(progress_enabled, "layout", len(image_paths) - 1,
                                                 selected_pages, label),
+            model_version=layout_model_version,
         ) if layout_backend in {"auto", "unlimited-ocr-mlx"} else None
     )
     emit_progress(
@@ -691,6 +698,7 @@ def pdf_to_source_html(
         "effective_layout_backend": effective_layout_backend,
         "pdf_classification": classification,
         "layout_model": layout_model if layout_engine is not None else "",
+        "layout_model_version": layout_model_version if layout_engine is not None else "",
         "layout_fallbacks": layout_fallbacks,
         "native_only_pages": native_only_pages,
         "ocr_runtime": layout_engine.stats if layout_engine is not None else None,
@@ -755,20 +763,24 @@ def import_pdf(
     fetch_result = None
     if pdf_url:
         fetch_result = download_binary(pdf_url, pdf_path, args.force, args.dry_run)
-    import_result = pdf_to_source_html(
-        pdf_path=pdf_path,
-        html_path=html_path,
-        assets_dir=assets_dir,
-        paper_id=paper_id,
-        title=title,
-        image_dpi=args.image_dpi,
-        max_pages=args.max_pages,
-        layout_backend=args.layout_backend,
-        layout_model=args.layout_model,
-        layout_max_tokens=args.layout_max_tokens,
-        dry_run=args.dry_run,
-        progress_enabled=args.progress,
-    )
+    try:
+        import_result = pdf_to_source_html(
+            pdf_path=pdf_path,
+            html_path=html_path,
+            assets_dir=assets_dir,
+            paper_id=paper_id,
+            title=title,
+            image_dpi=args.image_dpi,
+            max_pages=args.max_pages,
+            layout_backend=args.layout_backend,
+            layout_model=args.layout_model,
+            layout_max_tokens=args.layout_max_tokens,
+            dry_run=args.dry_run,
+            progress_enabled=args.progress,
+            layout_model_version=args.layout_model_version,
+        )
+    except pdf_layout.LayoutModelUnavailable as exc:
+        fail(str(exc))
     return fetch_result, import_result
 
 
@@ -1067,9 +1079,20 @@ def add_pdf_layout_flags(parser: argparse.ArgumentParser) -> None:
         help="layout source: automatic pdf-inspector routing, Unlimited-OCR MLX, native PDF geometry, or LiteParse",
     )
     parser.add_argument(
+        "--layout-model-version",
+        choices=("2", "1"),
+        default=None,
+        help=(
+            "OCR family. Default 2 (baidu/Unlimited-OCR-2, SR-SWA; not runnable under MLX). "
+            "1 selects Unlimited-OCR MLX (R-SWA, sahilchachra/unlimited-ocr-mxfp8-mlx). "
+            "An explicit --layout-model of a non-v2 checkpoint keeps the v1 MLX runtime "
+            "unless this flag is 2."
+        ),
+    )
+    parser.add_argument(
         "--layout-model",
-        default=pdf_layout.DEFAULT_LAYOUT_MODEL,
-        help="Hugging Face model id used by --layout-backend unlimited-ocr-mlx",
+        default="",
+        help="Hugging Face model id. Empty uses the id for --layout-model-version.",
     )
     parser.add_argument(
         "--layout-max-tokens",

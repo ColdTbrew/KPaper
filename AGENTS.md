@@ -90,7 +90,7 @@ For PDF-only papers, first import the PDF. `uv sync` installs pdf-inspector, Lit
   --json
 ```
 
-The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, classifies pages with pdf-inspector, preserves native text where available, runs the MLX model only for pages needing OCR, writes inline visual crops under `inputs/assets/<paper-id>/layout/`, and writes `inputs/<paper-id>.source.html`.
+The command normalizes Hugging Face `/blob/...` URLs to `/resolve/...`, stores the PDF under `inputs/pdfs/`, classifies pages with pdf-inspector, preserves native text where available, and runs OCR only for pages that need it. The default OCR family is Unlimited-OCR-2 (`--layout-model-version 2`, `baidu/Unlimited-OCR-2`). That model’s SR-SWA decoder does not run under the current MLX runtime; `--layout-model-version 1` selects the previous Unlimited-OCR MLX model. It writes inline visual crops under `inputs/assets/<paper-id>/layout/` and writes `inputs/<paper-id>.source.html`.
 
 Dry run before calling the model:
 
